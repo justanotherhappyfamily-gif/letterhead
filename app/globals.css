@@ -2,7 +2,7 @@
 
 @layer base {
   :root {
-    --background: #0f172a;
+    --background: #0b1120;
     --foreground: #f8fafc;
   }
 
@@ -10,19 +10,8 @@
     background-color: var(--background);
     color: var(--foreground);
     font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    overflow-x: hidden;
   }
-}
-
-/* Hide scrollbars globally across all inputs and textareas */
-textarea, input {
-  scrollbar-width: none !important;
-  -ms-overflow-style: none !important;
-}
-
-textarea::-webkit-scrollbar, input::-webkit-scrollbar {
-  display: none !important;
-  width: 0 !important;
-  height: 0 !important;
 }
 
 /* Custom Print and A4 Styling */
@@ -33,7 +22,24 @@ textarea::-webkit-scrollbar, input::-webkit-scrollbar {
     height: 297mm;
     box-sizing: border-box;
     background: #ffffff;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1);
+  }
+
+  /* Smooth custom scrollbars for screen */
+  .custom-scrollbar::-webkit-scrollbar {
+    height: 6px;
+    width: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.6);
+    border-radius: 9999px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.4);
+    border-radius: 9999px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.7);
   }
 }
 
@@ -82,6 +88,15 @@ textarea::-webkit-scrollbar, input::-webkit-scrollbar {
     height: 297mm !important;
   }
 
+  .a4-viewport {
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 210mm !important;
+    height: 297mm !important;
+    transform: none !important;
+    overflow: hidden !important;
+  }
+
   .a4-container {
     width: 210mm !important;
     height: 297mm !important;
@@ -95,6 +110,7 @@ textarea::-webkit-scrollbar, input::-webkit-scrollbar {
     page-break-inside: avoid !important;
     page-break-before: avoid !important;
     break-inside: avoid !important;
+    transform: none !important;
     overflow: hidden !important;
   }
 
