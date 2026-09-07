@@ -88,15 +88,6 @@
     height: 297mm !important;
   }
 
-  .a4-viewport {
-    padding: 0 !important;
-    margin: 0 !important;
-    width: 210mm !important;
-    height: 297mm !important;
-    transform: none !important;
-    overflow: hidden !important;
-  }
-
   .a4-container {
     width: 210mm !important;
     height: 297mm !important;

@@ -17,7 +17,7 @@ export default function LetterheadPage() {
     "Dear Sir/Madam,\n\nWe are pleased to submit our comprehensive business proposal for digital marketing and strategic growth services. At Zivic Nexus, we specialize in delivering high-impact marketing frameworks, end-to-end digital campaigns, and technological infrastructures designed to accelerate enterprise market leadership.\n\nOur team has analyzed your requirements and tailored a phased roadmap that ensures measurable ROI, enhanced brand presence, and seamless customer acquisition.\n\nWe look forward to partnering with your esteemed organization."
   );
   const [includeSignature, setIncludeSignature] = useState(true);
-  const [fitToScreen, setFitToScreen] = useState(false);
+
 
   // Reliable print handler
   const handlePrint = () => {
@@ -85,14 +85,6 @@ export default function LetterheadPage() {
             </div>
           </div>
 
-          {/* Mobile View Mode Button (Fit Screen vs 100%) */}
-          <button
-            type="button"
-            onClick={() => setFitToScreen(!fitToScreen)}
-            className="md:hidden flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 transition-all cursor-pointer shrink-0"
-          >
-            <span>{fitToScreen ? "🔍 100% Zoom" : "📱 Fit Mobile"}</span>
-          </button>
         </div>
 
         {/* Bottom Row: Action Buttons */}
@@ -153,22 +145,10 @@ export default function LetterheadPage() {
         </div>
       </header>
 
-      {/* Responsive Viewport Scroll Wrapper for Mobile/Tablet */}
-      <div
-        className={`w-full flex justify-center custom-scrollbar a4-viewport ${
-          fitToScreen
-            ? "overflow-hidden"
-            : "overflow-x-auto pb-8"
-        }`}
-      >
-        {/* A4 Letterhead Container (210mm x 297mm) */}
-        <div
-          className={`shrink-0 transition-transform duration-200 ${
-            fitToScreen
-              ? "origin-top scale-[0.46] xs:scale-[0.52] sm:scale-[0.72] md:scale-100 mb-[-150mm] xs:mb-[-135mm] sm:mb-[-75mm] md:mb-0"
-              : "origin-top"
-          }`}
-        >
+      {/* Mobile: horizontally scrollable so full A4 is accessible. Desktop: centered. */}
+      <div className="w-full overflow-x-auto pb-6 custom-scrollbar">
+        <div className="flex justify-start sm:justify-center" style={{ minWidth: "210mm" }}>
+          {/* A4 Letterhead Container (210mm x 297mm) */}
           <main
             className="a4-container relative flex flex-col justify-between overflow-hidden bg-white text-slate-900 shadow-2xl font-sans"
             style={{ width: "210mm", height: "297mm", minHeight: "297mm", maxHeight: "297mm" }}
