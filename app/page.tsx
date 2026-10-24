@@ -88,17 +88,7 @@ The payment gateway is deployed strictly for:
 7. COMMITMENT TO COMPLIANCE & OPEN COLLABORATION
 Zivic Nexus is in an active, dynamic development stage. We hold the utmost respect for Razorpay’s risk governance, compliance mandates, and merchant onboarding guidelines. If your underwriting or compliance team recommends any specific adjustments to our website disclosures, tier nomenclature, or feature presentation, our management team is fully receptive, cooperative, and committed to executing them promptly.
 
-We kindly request you to record this operational declaration and continue our active payment gateway processing.
-
-Sincerely,
-
-For Zivic Nexus
-Authorized Signatory
-Designation: Founder & Managing Director
-Phone: +91-9115233773
-Email: zivicnexus@gmail.com
-Website: https://zivicnexus.com
-Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005`
+We kindly request you to record this operational declaration and continue our active payment gateway processing.`
   );
   const [includeSignature, setIncludeSignature] = useState(true);
   const [density, setDensity] = useState<"normal" | "compact" | "ultra-compact">("normal");
@@ -686,11 +676,19 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
                 </div>
               </div>
 
-              {/* Sign-off Section (Protected from splitting across pages) */}
-              <div className="letter-signature relative z-10 flex items-end justify-between pt-4 pb-2 print:break-inside-avoid">
-                <div className="text-[10px] text-slate-600 font-medium">
-                  <p>Sincerely,</p>
+            </section>
+
+            {/* ========================================================================= */}
+            {/* 3. RUNNING BOTTOM FOOTER (Signature + Stamp + Bottom Banner)              */}
+            {/* Fixed at the bottom of EVERY printed page, anchored at bottom on screen   */}
+            {/* ========================================================================= */}
+            <footer className="letter-running-footer relative w-full z-20 flex flex-col justify-end">
+              {/* Sign-off & Proprietor Stamp */}
+              <div className="letter-signature px-8 pb-1.5 flex items-end justify-between">
+                <div className="text-[10px] text-slate-700 font-medium leading-tight">
+                  <p className="font-semibold text-slate-800">Sincerely,</p>
                   <p className="font-bold text-black mt-0.5">For Zivic Nexus</p>
+                  <p className="text-[9px] text-slate-500">Authorized Signatory / Proprietor</p>
                 </div>
 
                 {includeSignature && (
@@ -707,55 +705,52 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
                   </div>
                 )}
               </div>
-            </section>
 
-            {/* ========================================================================= */}
-            {/* 3. FOOTER SECTION (Website Banner + Bottom Chevron Banner)                */}
-            {/* ========================================================================= */}
-            <section className="letter-footer relative w-full z-10 flex flex-col print:break-inside-avoid">
-              {/* Website Divider */}
-              <div className="px-8 pb-2 flex items-center justify-center gap-3">
-                <div className="flex-1 flex items-center">
-                  <div className="w-1.5 h-1.5 rounded-full bg-[#C0272D]" />
-                  <div className="h-[1.5px] flex-1 bg-[#C0272D]" />
+              {/* Official Website Divider & Chevron Banner */}
+              <div className="letter-footer relative w-full flex flex-col">
+                <div className="px-8 pb-1.5 flex items-center justify-center gap-3">
+                  <div className="flex-1 flex items-center">
+                    <div className="w-1.5 h-1.5 rounded-full bg-[#C0272D]" />
+                    <div className="h-[1.5px] flex-1 bg-[#C0272D]" />
+                  </div>
+                  <div className="flex items-center gap-2 px-3">
+                    <svg className="w-3.5 h-3.5 text-[#C0272D]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <circle cx="12" cy="12" r="10" strokeWidth="1.8" />
+                      <path strokeWidth="1.8" d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
+                    </svg>
+                    <span className="font-bold text-[12px] text-[#C0272D] tracking-wide font-['Montserrat']">
+                      www.zivicnexus.com
+                    </span>
+                  </div>
+                  <div className="flex-1 flex items-center">
+                    <div className="h-[1.5px] flex-1 bg-[#C0272D]" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-[#C0272D]" />
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 px-3">
-                  <svg className="w-3.5 h-3.5 text-[#C0272D]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <circle cx="12" cy="12" r="10" strokeWidth="1.8" />
-                    <path strokeWidth="1.8" d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
+
+                {/* Bottom Geometric Chevron Banner */}
+                <div className="relative w-full h-[28px] overflow-hidden">
+                  <svg className="w-full h-full" viewBox="0 0 1000 40" preserveAspectRatio="none">
+                    <defs>
+                      <linearGradient id="footerOrangeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" stopColor="#E65100" />
+                        <stop offset="50%" stopColor="#F7941D" />
+                        <stop offset="100%" stopColor="#FFA726" />
+                      </linearGradient>
+                      <linearGradient id="footerCenterGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" stopColor="#750E12" />
+                        <stop offset="50%" stopColor="#B31D24" />
+                        <stop offset="100%" stopColor="#750E12" />
+                      </linearGradient>
+                    </defs>
+                    <rect x="0" y="0" width="1000" height="40" fill="#5A0205" />
+                    <polygon points="0,0 150,0 100,40 0,40" fill="url(#footerOrangeGrad)" />
+                    <polygon points="140,0 860,0 820,40 90,40" fill="url(#footerCenterGrad)" />
+                    <polygon points="850,0 1000,0 1000,40 810,40" fill="url(#footerOrangeGrad)" />
                   </svg>
-                  <span className="font-bold text-[12px] text-[#C0272D] tracking-wide font-['Montserrat']">
-                    www.zivicnexus.com
-                  </span>
-                </div>
-                <div className="flex-1 flex items-center">
-                  <div className="h-[1.5px] flex-1 bg-[#C0272D]" />
-                  <div className="w-1.5 h-1.5 rounded-full bg-[#C0272D]" />
                 </div>
               </div>
-
-              {/* Bottom Geometric Chevron Banner */}
-              <div className="relative w-full h-[28px] overflow-hidden">
-                <svg className="w-full h-full" viewBox="0 0 1000 40" preserveAspectRatio="none">
-                  <defs>
-                    <linearGradient id="footerOrangeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                      <stop offset="0%" stopColor="#E65100" />
-                      <stop offset="50%" stopColor="#F7941D" />
-                      <stop offset="100%" stopColor="#FFA726" />
-                    </linearGradient>
-                    <linearGradient id="footerCenterGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                      <stop offset="0%" stopColor="#750E12" />
-                      <stop offset="50%" stopColor="#B31D24" />
-                      <stop offset="100%" stopColor="#750E12" />
-                    </linearGradient>
-                  </defs>
-                  <rect x="0" y="0" width="1000" height="40" fill="#5A0205" />
-                  <polygon points="0,0 150,0 100,40 0,40" fill="url(#footerOrangeGrad)" />
-                  <polygon points="140,0 860,0 820,40 90,40" fill="url(#footerCenterGrad)" />
-                  <polygon points="850,0 1000,0 1000,40 810,40" fill="url(#footerOrangeGrad)" />
-                </svg>
-              </div>
-            </section>
+            </footer>
           </main>
         </div>
       </div>
