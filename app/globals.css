@@ -19,7 +19,7 @@
   .a4-container {
     width: 210mm;
     min-height: 297mm;
-    height: 297mm;
+    height: auto;
     box-sizing: border-box;
     background: #ffffff;
     box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1);
@@ -41,11 +41,23 @@
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     background: rgba(148, 163, 184, 0.7);
   }
+
+  .watermark-container {
+    position: absolute;
+    top: 350px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 0;
+  }
 }
 
 @media print {
   @page {
     size: A4 portrait;
+    margin: 14mm 0 14mm 0;
+  }
+
+  @page :first {
     margin: 0;
   }
   
@@ -68,9 +80,10 @@
     margin: 0 !important;
     padding: 0 !important;
     width: 210mm !important;
-    height: 297mm !important;
+    height: auto !important;
     min-height: 297mm !important;
-    max-height: 297mm !important;
+    max-height: none !important;
+    overflow: visible !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
@@ -85,24 +98,49 @@
     background: #ffffff !important;
     display: block !important;
     width: 210mm !important;
-    height: 297mm !important;
+    height: auto !important;
+    min-height: 297mm !important;
+    overflow: visible !important;
   }
 
   .a4-container {
     width: 210mm !important;
-    height: 297mm !important;
+    height: auto !important;
     min-height: 297mm !important;
-    max-height: 297mm !important;
+    max-height: none !important;
     margin: 0 !important;
     padding: 0 !important;
     box-shadow: none !important;
     border: none !important;
-    page-break-after: avoid !important;
-    page-break-inside: avoid !important;
-    page-break-before: avoid !important;
-    break-inside: avoid !important;
+    page-break-after: auto !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
     transform: none !important;
-    overflow: hidden !important;
+    overflow: visible !important;
+  }
+
+  /* Repeat watermark in center of every printed page */
+  .watermark-container {
+    position: fixed !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    z-index: 0 !important;
+    opacity: 0.05 !important;
+    pointer-events: none !important;
+  }
+
+  /* Keep header and footer together */
+  .letter-header,
+  .letter-footer,
+  .letter-signature {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .letter-body {
+    page-break-inside: auto !important;
+    break-inside: auto !important;
   }
 
   input, textarea {
@@ -111,7 +149,7 @@
     resize: none !important;
     outline: none !important;
     box-shadow: none !important;
-    overflow: hidden !important;
+    overflow: visible !important;
     scrollbar-width: none !important;
   }
 

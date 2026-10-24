@@ -101,7 +101,7 @@ Website: https://zivicnexus.com
 Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005`
   );
   const [includeSignature, setIncludeSignature] = useState(true);
-  const [density, setDensity] = useState<"normal" | "compact" | "ultra-compact">("ultra-compact");
+  const [density, setDensity] = useState<"normal" | "compact" | "ultra-compact">("normal");
 
   // Cloud & UI State
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -121,7 +121,7 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
     }
   };
 
-  // Keyboard shortcuts (Ctrl+P / Cmd+P for print, Ctrl+S / Cmd+S for save)
+  // Keyboard shortcuts (Ctrl+P for print, Ctrl+S for save)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "p") {
@@ -149,6 +149,8 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
         if (!currentId) {
           setRefNo(generateRefNo(date, data.letters.length));
         }
+      } else if (!data.success && data.error) {
+        setSaveError(data.error);
       }
     } catch (err) {
       console.error("Failed to load letters from Firebase:", err);
@@ -204,7 +206,7 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
       console.error("Save error:", err);
       setSaveStatus("error");
       setSaveError(err.message || "Could not save to Firebase");
-      setTimeout(() => setSaveStatus("idle"), 4000);
+      setTimeout(() => setSaveStatus("idle"), 5000);
     }
   };
 
@@ -237,13 +239,6 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
     setSubject(item.subject || "");
     setBodyText(item.bodyText || "");
     setIncludeSignature(item.includeSignature !== false);
-    if ((item.bodyText || "").length > 2500) {
-      setDensity("ultra-compact");
-    } else if ((item.bodyText || "").length > 1200) {
-      setDensity("compact");
-    } else {
-      setDensity("normal");
-    }
     setShowHistoryModal(false);
   };
 
@@ -285,9 +280,9 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
   const getBodyTypography = () => {
     switch (density) {
       case "ultra-compact":
-        return "text-[8.5px] leading-[12.5px]";
+        return "text-[9px] leading-[13.5px]";
       case "compact":
-        return "text-[10px] leading-[15px]";
+        return "text-[10px] leading-[15.5px]";
       default:
         return "text-[11.5px] leading-relaxed";
     }
@@ -310,12 +305,12 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
                 </h1>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  Firebase Cloud Active
+                  Multi-Page A4 Ready
                 </span>
               </div>
               <p className="text-slate-400 text-[11px] sm:text-xs">
                 {currentId ? (
-                  <span className="text-blue-400">Editing saved letterhead</span>
+                  <span className="text-blue-400">Editing saved document in cloud</span>
                 ) : (
                   <span>Auto-generated Ref No: <strong className="text-white font-mono">{refNo}</strong></span>
                 )}
@@ -331,7 +326,7 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                 </svg>
-                Saving to Firebase...
+                Saving to Cloud...
               </span>
             )}
             {saveStatus === "saved" && (
@@ -340,8 +335,8 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
               </span>
             )}
             {saveStatus === "error" && (
-              <span className="text-xs text-red-400 font-semibold">
-                {saveError || "Save failed"}
+              <span className="text-xs text-red-400 font-medium max-w-xs truncate" title={saveError || ""}>
+                {saveError?.includes("credentials not found") ? "Configure Firebase on Vercel" : saveError}
               </span>
             )}
           </div>
@@ -458,18 +453,31 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
         </div>
       </header>
 
-      {/* A4 Letterhead Preview Container */}
+      {/* A4 Letterhead Preview Container (Auto-expanding multi-page) */}
       <div className="w-full overflow-x-auto pb-8 custom-scrollbar">
         <div className="flex justify-start sm:justify-center" style={{ minWidth: "210mm" }}>
-          {/* A4 Sheet (210mm x 297mm) */}
+          {/* Main A4 Document Sheet (Auto height for seamless multi-page pagination) */}
           <main
-            className="a4-container relative flex flex-col justify-between overflow-hidden bg-white text-slate-900 shadow-2xl font-sans"
-            style={{ width: "210mm", height: "297mm", minHeight: "297mm", maxHeight: "297mm" }}
+            className="a4-container relative flex flex-col justify-between bg-white text-slate-900 shadow-2xl font-sans print:shadow-none print:border-none"
+            style={{ width: "210mm", minHeight: "297mm" }}
           >
+            {/* Watermark in center of sheet / repeated on all printed pages */}
+            <div className="watermark-container pointer-events-none select-none">
+              <div className="relative w-[420px] h-[270px] opacity-[0.06] print:opacity-[0.05]">
+                <Image
+                  src="/logo_clean.png"
+                  alt="ZN Watermark"
+                  fill
+                  className="object-contain"
+                  priority
+                />
+              </div>
+            </div>
+
             {/* ========================================================================= */}
-            {/* 1. TOP SECTION (Top Gradient Banner + Header Contact Grid)                */}
+            {/* 1. TOP SECTION (Header - Stays on Page 1)                                  */}
             {/* ========================================================================= */}
-            <section className="relative w-full z-10 flex flex-col">
+            <section className="letter-header relative w-full z-10 flex flex-col print:break-inside-avoid">
               {/* Top Geometric Angular Banner */}
               <div className="relative w-full h-[38px] overflow-hidden">
                 <svg className="w-full h-full" viewBox="0 0 1000 45" preserveAspectRatio="none">
@@ -592,31 +600,17 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
             </section>
 
             {/* ========================================================================= */}
-            {/* 2. BODY SECTION (Form Fields + Watermark + Main Text + Signature)          */}
+            {/* 2. BODY SECTION (Auto Multi-Page Pagination Flow)                         */}
             {/* ========================================================================= */}
-            <section className="relative flex-1 px-8 py-3 z-10 flex flex-col justify-between overflow-hidden">
-              {/* Centered Translucent Watermark */}
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none z-0">
-                <div className="relative w-[420px] h-[270px] opacity-[0.06]">
-                  <Image
-                    src="/logo_clean.png"
-                    alt="ZN Watermark"
-                    fill
-                    className="object-contain"
-                    priority
-                  />
-                </div>
-              </div>
-
-              {/* Top Form Fields */}
+            <section className="letter-body relative flex-1 px-8 py-3 z-10 flex flex-col justify-between print:break-inside-auto">
+              {/* Form Fields & Content */}
               <div className="relative z-10 flex flex-col">
                 {/* Row 1: Strict ZVN<YYYY><MM><DD><counter> Ref. No. & Date */}
-                <div className="flex items-center justify-between gap-6 pb-2">
+                <div className="flex items-center justify-between gap-6 pb-2 print:break-inside-avoid">
                   <div className="flex items-center gap-2 flex-1 max-w-[340px]">
                     <span className="font-bold text-[11px] text-black whitespace-nowrap font-['Montserrat']">
                       Ref. No. :
                     </span>
-                    {/* Non-editable Ref. No. */}
                     <span className="text-[11px] font-semibold text-slate-900 font-mono tracking-wider select-all px-1 py-0.5">
                       {refNo}
                     </span>
@@ -640,12 +634,12 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
                 </div>
 
                 {/* Row 2: To, & Recipient */}
-                <div className="pt-0.5">
+                <div className="pt-0.5 print:break-inside-avoid">
                   <span className="font-bold text-[11px] text-black font-['Montserrat']">
                     To,
                   </span>
                 </div>
-                <div className="pt-0.5 pb-1.5">
+                <div className="pt-0.5 pb-1.5 print:break-inside-avoid">
                   <textarea
                     value={recipient}
                     onChange={(e) => setRecipient(e.target.value)}
@@ -659,7 +653,7 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
                 </div>
 
                 {/* Row 3: Subject : */}
-                <div className="pt-0.5 pb-1.5 flex items-start gap-2">
+                <div className="pt-0.5 pb-1.5 flex items-start gap-2 print:break-inside-avoid">
                   <span className="font-bold text-[11px] text-black whitespace-nowrap font-['Montserrat'] mt-0.5">
                     Subject :
                   </span>
@@ -675,23 +669,25 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
                   </span>
                 </div>
 
-                {/* Main Letter Body */}
-                <div className="pt-0.5">
+                {/* Main Letter Body Space */}
+                <div className="pt-1">
+                  {/* Screen Editable Textarea with auto expandable min-height */}
                   <textarea
                     value={bodyText}
                     onChange={(e) => setBodyText(e.target.value)}
-                    rows={density === "ultra-compact" ? 22 : 12}
+                    rows={18}
                     placeholder="Type your letter content here..."
-                    className={`print:hidden w-full ${getBodyTypography()} text-slate-800 bg-transparent border border-transparent hover:border-slate-200 focus:border-slate-400 rounded-lg p-1 focus:outline-none font-sans resize-none transition-all placeholder:italic placeholder:text-slate-400 overflow-hidden`}
+                    className={`print:hidden w-full min-h-[380px] ${getBodyTypography()} text-slate-800 bg-transparent border border-slate-200 hover:border-slate-300 focus:border-slate-400 rounded-lg p-2 focus:outline-none font-sans resize-y transition-all placeholder:italic placeholder:text-slate-400`}
                   />
-                  <div className={`hidden print:block whitespace-pre-wrap ${getBodyTypography()} text-slate-800 font-sans`}>
+                  {/* Print View: Continuous paragraph flow that naturally breaks into Page 2, Page 3 */}
+                  <div className={`hidden print:block whitespace-pre-wrap ${getBodyTypography()} text-slate-800 font-sans print:break-words print:break-inside-auto`}>
                     {bodyText}
                   </div>
                 </div>
               </div>
 
-              {/* Sign-off Section */}
-              <div className="relative z-10 flex items-end justify-between pt-1 pb-0.5">
+              {/* Sign-off Section (Protected from splitting across pages) */}
+              <div className="letter-signature relative z-10 flex items-end justify-between pt-4 pb-2 print:break-inside-avoid">
                 <div className="text-[10px] text-slate-600 font-medium">
                   <p>Sincerely,</p>
                   <p className="font-bold text-black mt-0.5">For Zivic Nexus</p>
@@ -714,9 +710,9 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
             </section>
 
             {/* ========================================================================= */}
-            {/* 3. FOOTER SECTION (Website Banner + Bottom Geometric Banner)              */}
+            {/* 3. FOOTER SECTION (Website Banner + Bottom Chevron Banner)                */}
             {/* ========================================================================= */}
-            <section className="relative w-full z-10 flex flex-col">
+            <section className="letter-footer relative w-full z-10 flex flex-col print:break-inside-avoid">
               {/* Website Divider */}
               <div className="px-8 pb-2 flex items-center justify-center gap-3">
                 <div className="flex-1 flex items-center">
@@ -777,7 +773,7 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
                   📁
                 </div>
                 <div>
-                  <h2 className="text-white font-bold text-base">Saved Letterheads (Firebase)</h2>
+                  <h2 className="text-white font-bold text-base">Saved Letterheads (Cloud Archive)</h2>
                   <p className="text-slate-400 text-xs">Browse, edit, or delete previously generated letters</p>
                 </div>
               </div>
