@@ -16,11 +16,23 @@ interface SavedLetter {
   createdAt?: string;
 }
 
+// Generates reference number in format: ZVN<YYYY><MM><DD><counter starting from 1000>
+function generateRefNo(dateInput?: string, count: number = 0): string {
+  const d = dateInput ? new Date(dateInput) : new Date();
+  const year = isNaN(d.getFullYear()) ? new Date().getFullYear() : d.getFullYear();
+  const month = String(isNaN(d.getMonth()) ? new Date().getMonth() + 1 : d.getMonth() + 1).padStart(2, "0");
+  const day = String(isNaN(d.getDate()) ? new Date().getDate() : d.getDate()).padStart(2, "0");
+  const serial = 1000 + count;
+  return `ZVN${year}${month}${day}${serial}`;
+}
+
 export default function LetterheadPage() {
+  const todayStr = new Date().toISOString().split("T")[0];
+
   // Current active letter state
   const [currentId, setCurrentId] = useState<string | null>(null);
-  const [refNo, setRefNo] = useState("ZN/COMPL/RZP/2026/10-01");
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(todayStr);
+  const [refNo, setRefNo] = useState(() => generateRefNo(todayStr, 0));
   const [recipient, setRecipient] = useState(
     "The Risk & Compliance Division / Merchant Underwriting\nRazorpay Software Private Limited\nSJR Cyber, 1st Floor, 22 Laskar-Hosur Road,\nAdugodi, Bengaluru, Karnataka – 560030"
   );
@@ -133,6 +145,10 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
       const data = await res.json();
       if (data.success && Array.isArray(data.letters)) {
         setSavedLetters(data.letters);
+        // If this is a fresh unsaved letter, dynamically update counter based on saved count
+        if (!currentId) {
+          setRefNo(generateRefNo(date, data.letters.length));
+        }
       }
     } catch (err) {
       console.error("Failed to load letters from Firebase:", err);
@@ -145,6 +161,14 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
   useEffect(() => {
     fetchSavedLetters();
   }, []);
+
+  // Update date and regenerate refNo if new document
+  const handleDateChange = (newDate: string) => {
+    setDate(newDate);
+    if (!currentId) {
+      setRefNo(generateRefNo(newDate, savedLetters.length));
+    }
+  };
 
   // Save to Firebase Cloud
   const handleSaveToCloud = async () => {
@@ -162,7 +186,7 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
           subject,
           bodyText,
           includeSignature,
-          category: subject.toLowerCase().includes("compliance") ? "COMPLIANCE" : "GENERAL",
+          category: "GENERAL",
         }),
       });
       const data = await res.json();
@@ -207,7 +231,7 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
   // Load a selected letter into editor
   const handleLoadLetter = (item: SavedLetter) => {
     setCurrentId(item.id);
-    setRefNo(item.refNo || "");
+    setRefNo(item.refNo || generateRefNo(item.date, 0));
     setDate(item.date || "");
     setRecipient(item.recipient || "");
     setSubject(item.subject || "");
@@ -223,15 +247,12 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
     setShowHistoryModal(false);
   };
 
-  // Clear to new blank letter with automated serial Ref No
+  // Clear to new blank letter with automated ZVN<YYYY><MM><DD><counter>
   const handleNewLetter = () => {
     setCurrentId(null);
-    const d = new Date();
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const count = String(savedLetters.length + 1).padStart(3, "0");
-    setRefNo(`ZN/${year}/${month}/${count}`);
-    setDate(d.toISOString().split("T")[0]);
+    const today = new Date().toISOString().split("T")[0];
+    setDate(today);
+    setRefNo(generateRefNo(today, savedLetters.length));
     setRecipient("");
     setSubject("");
     setBodyText("");
@@ -294,15 +315,15 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
               </div>
               <p className="text-slate-400 text-[11px] sm:text-xs">
                 {currentId ? (
-                  <span className="text-blue-400">Editing saved letter in Firebase</span>
+                  <span className="text-blue-400">Editing saved letterhead</span>
                 ) : (
-                  <span>Ref No. is automatically managed • Click and edit letter content</span>
+                  <span>Auto-generated Ref No: <strong className="text-white font-mono">{refNo}</strong></span>
                 )}
               </p>
             </div>
           </div>
 
-          {/* Quick Info & Cloud Save Status */}
+          {/* Cloud Save Status */}
           <div className="flex items-center gap-2">
             {saveStatus === "saving" && (
               <span className="text-xs text-amber-400 flex items-center gap-1.5">
@@ -343,7 +364,7 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
               <span>{currentId ? "Update in Cloud" : "Save to Cloud"}</span>
             </button>
 
-            {/* History / Archive Drawer Button */}
+            {/* Saved Letters Archive Button */}
             <button
               type="button"
               onClick={() => {
@@ -589,14 +610,14 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
 
               {/* Top Form Fields */}
               <div className="relative z-10 flex flex-col">
-                {/* Row 1: Non-editable Ref. No. & Date */}
+                {/* Row 1: Strict ZVN<YYYY><MM><DD><counter> Ref. No. & Date */}
                 <div className="flex items-center justify-between gap-6 pb-2">
                   <div className="flex items-center gap-2 flex-1 max-w-[340px]">
                     <span className="font-bold text-[11px] text-black whitespace-nowrap font-['Montserrat']">
                       Ref. No. :
                     </span>
-                    {/* Non-editable Ref. No. Text */}
-                    <span className="text-[11px] font-semibold text-slate-900 font-mono tracking-wide select-all px-1 py-0.5">
+                    {/* Non-editable Ref. No. */}
+                    <span className="text-[11px] font-semibold text-slate-900 font-mono tracking-wider select-all px-1 py-0.5">
                       {refNo}
                     </span>
                   </div>
@@ -608,7 +629,7 @@ Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005
                     <input
                       type="text"
                       value={date}
-                      onChange={(e) => setDate(e.target.value)}
+                      onChange={(e) => handleDateChange(e.target.value)}
                       placeholder="YYYY-MM-DD"
                       className="print:hidden flex-1 text-[11px] text-slate-800 border-b border-slate-300 focus:border-[#C0272D] bg-transparent focus:outline-none px-1 py-0.5 font-medium text-right transition-colors"
                     />
