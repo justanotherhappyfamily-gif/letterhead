@@ -68,33 +68,19 @@ function paginateLetterText(
   density: "normal" | "compact" | "ultra-compact",
   recipientLines: number
 ): string[] {
-  // 1. If explicit page break markers exist, respect them directly
-  if (/---page-break---|\[pagebreak\]/i.test(bodyText)) {
-    const rawPages = bodyText.split(/---page-break---|\[pagebreak\]/i);
-    return rawPages.map((p) => p.trim()).filter((p, idx) => p.length > 0 || idx === 0);
-  }
-
-  // 2. Capacity per page based on density (in estimated line units)
-  // Page 1 capacity: has full header (~140px) + Ref/Date/To/Subject (~130px) + footer (~50px)
-  // Available height on Page 1 ~ 800px.
-  // In normal (11.5px / 19px): ~42 lines.
-  // In compact (10px / 15.5px): ~52 lines.
-  // In ultra-compact (9px / 13.5px): ~62 lines.
-  let page1Capacity = 42;
-  let page2Capacity = 60;
+  // Capacity per page based on density (in estimated line units)
+  let page1Capacity = 36;
+  let page2Capacity = 48;
   if (density === "compact") {
-    page1Capacity = 52;
-    page2Capacity = 75;
+    page1Capacity = 44;
+    page2Capacity = 60;
   } else if (density === "ultra-compact") {
-    page1Capacity = 62;
-    page2Capacity = 90;
+    page1Capacity = 54;
+    page2Capacity = 72;
   }
 
   // Adjust Page 1 capacity based on recipient lines (default ~3 lines)
-  page1Capacity = Math.max(25, page1Capacity - (recipientLines - 3) * 1.2);
-
-  // Split into paragraphs / logical blocks
-  const paragraphs = bodyText.split(/\n\n+/);
+  page1Capacity = Math.max(20, Math.floor(page1Capacity - (recipientLines - 3) * 1.2));
 
   // Helper to estimate line count of a text block
   const estimateLines = (text: string): number => {
@@ -112,32 +98,95 @@ function paginateLetterText(
     return total + 0.6; // paragraph spacing
   };
 
-  const pages: string[] = [];
-  let currentPageParagraphs: string[] = [];
-  let currentLines = 0;
-  let isFirstPage = true;
+  // Helper to split an oversized paragraph by individual lines
+  const splitLongPara = (para: string, maxCap: number): string[] => {
+    const lines = para.split("\n");
+    const subChunks: string[] = [];
+    let curLines: string[] = [];
+    let curCount = 0;
 
-  for (const para of paragraphs) {
-    const paraLines = estimateLines(para);
-    const maxCapacity = isFirstPage ? page1Capacity : page2Capacity;
+    for (const line of lines) {
+      const lineCost = Math.max(1, Math.ceil((line.length || 1) / 85));
+      if (curCount + lineCost > maxCap && curLines.length > 0) {
+        subChunks.push(curLines.join("\n"));
+        curLines = [line];
+        curCount = lineCost;
+      } else {
+        curLines.push(line);
+        curCount += lineCost;
+      }
+    }
+    if (curLines.length > 0) subChunks.push(curLines.join("\n"));
+    return subChunks.length > 0 ? subChunks : [para];
+  };
 
-    if (currentLines + paraLines > maxCapacity && currentPageParagraphs.length > 0) {
-      // Current page is full, push to pages
-      pages.push(currentPageParagraphs.join("\n\n"));
-      currentPageParagraphs = [para];
-      currentLines = paraLines;
-      isFirstPage = false;
-    } else {
-      currentPageParagraphs.push(para);
-      currentLines += paraLines;
+  // 1. Split body by manual page break markers: ---page-break--- or [pagebreak]
+  // We trim trailing empty sections so an accidental break at the very end doesn't spawn an empty page
+  const rawSections = bodyText.split(/\s*---page-break---\s*|\s*\[pagebreak\]\s*/i);
+  while (rawSections.length > 1 && rawSections[rawSections.length - 1].trim() === "") {
+    rawSections.pop();
+  }
+
+  const finalPages: string[] = [];
+
+  for (let sIdx = 0; sIdx < rawSections.length; sIdx++) {
+    const sectionText = rawSections[sIdx];
+    const paragraphs = sectionText.split(/\n\n+/).filter((p) => p.length > 0);
+
+    if (paragraphs.length === 0) {
+      if (finalPages.length === 0 || sIdx < rawSections.length - 1) {
+        finalPages.push("");
+      }
+      continue;
+    }
+
+    let currentPageParagraphs: string[] = [];
+    let currentLines = 0;
+
+    for (const para of paragraphs) {
+      const isFirstPage = finalPages.length === 0 && currentPageParagraphs.length === 0;
+      const maxCapacity = isFirstPage ? page1Capacity : page2Capacity;
+      const paraLines = estimateLines(para);
+
+      if (paraLines > maxCapacity) {
+        // If current page already has text, flush it first
+        if (currentPageParagraphs.length > 0) {
+          finalPages.push(currentPageParagraphs.join("\n\n"));
+          currentPageParagraphs = [];
+          currentLines = 0;
+        }
+        // Split this oversized paragraph into fitting pieces
+        const subParas = splitLongPara(para, finalPages.length === 0 ? page1Capacity : page2Capacity);
+        for (const sub of subParas) {
+          const subLines = estimateLines(sub);
+          const currentCap = (finalPages.length === 0 && currentPageParagraphs.length === 0) ? page1Capacity : page2Capacity;
+          if (currentLines + subLines > currentCap && currentPageParagraphs.length > 0) {
+            finalPages.push(currentPageParagraphs.join("\n\n"));
+            currentPageParagraphs = [sub];
+            currentLines = subLines;
+          } else {
+            currentPageParagraphs.push(sub);
+            currentLines += subLines;
+          }
+        }
+      } else if (currentLines + paraLines > maxCapacity && currentPageParagraphs.length > 0) {
+        // Current page is full, push to pages and start new page
+        finalPages.push(currentPageParagraphs.join("\n\n"));
+        currentPageParagraphs = [para];
+        currentLines = paraLines;
+      } else {
+        currentPageParagraphs.push(para);
+        currentLines += paraLines;
+      }
+    }
+
+    // Flush remaining paragraphs in this manual section
+    if (currentPageParagraphs.length > 0) {
+      finalPages.push(currentPageParagraphs.join("\n\n"));
     }
   }
 
-  if (currentPageParagraphs.length > 0) {
-    pages.push(currentPageParagraphs.join("\n\n"));
-  }
-
-  return pages.length > 0 ? pages : [""];
+  return finalPages.length > 0 ? finalPages : [""];
 }
 
 export default function LetterheadPage() {
@@ -233,6 +282,8 @@ We kindly request you to record this operational declaration and continue our ac
   const pages = paginateLetterText(bodyText, density, recipientLineCount);
   const totalPages = pages.length;
 
+  const bodyTextareaRef = useRef<HTMLTextAreaElement>(null);
+
   const handleVerifyRefNo = async (queryToVerify?: string) => {
     const query = (queryToVerify ?? verifyQuery).trim().toUpperCase();
     if (!query) return;
@@ -312,6 +363,16 @@ We kindly request you to record this operational declaration and continue our ac
             pixelRatio: 2.5, // 2.5x pixel ratio for 300 DPI razor-sharp print quality
             cacheBust: true,
             backgroundColor: "#ffffff",
+            filter: (node) => {
+              if (
+                node instanceof HTMLElement &&
+                (node.classList.contains("no-print") ||
+                  node.getAttribute("data-no-export") === "true")
+              ) {
+                return false;
+              }
+              return true;
+            },
           });
         } catch (captureErr) {
           console.warn("toPng fallback to html2canvas:", captureErr);
@@ -322,6 +383,9 @@ We kindly request you to record this operational declaration and continue our ac
             allowTaint: true,
             backgroundColor: "#ffffff",
             logging: false,
+            ignoreElements: (element) =>
+              element.classList.contains("no-print") ||
+              element.getAttribute("data-no-export") === "true",
           });
           imgData = canvas.toDataURL("image/png");
         }
@@ -489,9 +553,24 @@ We kindly request you to record this operational declaration and continue our ac
     setDensity(t.density);
   };
 
-  // Insert manual page break marker into text
+  // Insert manual page break marker into text at current cursor location
   const insertPageBreak = () => {
-    setBodyText((prev) => prev + "\n\n---page-break---\n\n");
+    if (bodyTextareaRef.current) {
+      const el = bodyTextareaRef.current;
+      const start = el.selectionStart ?? bodyText.length;
+      const end = el.selectionEnd ?? bodyText.length;
+      const before = bodyText.substring(0, start);
+      const after = bodyText.substring(end);
+      const marker = "\n\n---page-break---\n\n";
+      const nextText = `${before}${marker}${after}`;
+      setBodyText(nextText);
+      setTimeout(() => {
+        el.focus();
+        el.setSelectionRange(start + marker.length, start + marker.length);
+      }, 10);
+    } else {
+      setBodyText((prev) => prev + "\n\n---page-break---\n\n");
+    }
   };
 
   const filteredLetters = savedLetters.filter((item) => {
@@ -737,7 +816,7 @@ We kindly request you to record this operational declaration and continue our ac
   );
 
   const SignatureBlock = () => (
-    <div className="px-8 pb-1 pt-2 flex items-end justify-between shrink-0">
+    <div className="w-full pb-1 pt-2 flex items-end justify-between shrink-0">
       <div className="text-[10px] text-slate-700 font-medium leading-tight">
         <p className="font-semibold text-slate-800">Sincerely,</p>
         <p className="font-bold text-black mt-0.5">For Zivic Nexus</p>
@@ -1029,13 +1108,23 @@ We kindly request you to record this operational declaration and continue our ac
             <div className="flex flex-col gap-1">
               <div className="flex items-center justify-between">
                 <label className="text-slate-400 font-semibold text-[11px]">Reference Number</label>
-                <button
-                  type="button"
-                  onClick={() => setRefNo(generateEncryptedRefNo(date))}
-                  className="text-[10px] text-blue-400 hover:underline cursor-pointer"
-                >
-                  Regenerate
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => openVerificationFor(refNo)}
+                    className="text-[10px] text-indigo-400 hover:underline cursor-pointer"
+                  >
+                    Verify in DB
+                  </button>
+                  <span className="text-slate-600 text-[10px]">•</span>
+                  <button
+                    type="button"
+                    onClick={() => setRefNo(generateEncryptedRefNo(date))}
+                    className="text-[10px] text-blue-400 hover:underline cursor-pointer"
+                  >
+                    Regenerate
+                  </button>
+                </div>
               </div>
               <input
                 type="text"
@@ -1082,10 +1171,11 @@ We kindly request you to record this operational declaration and continue our ac
                 </div>
               </div>
               <textarea
+                ref={bodyTextareaRef}
                 rows={12}
                 value={bodyText}
                 onChange={(e) => setBodyText(e.target.value)}
-                placeholder="Type your official letterhead content here. Use '---page-break---' to split across pages manually if required."
+                placeholder="Type your official letterhead content here. Place cursor and click '➕ Insert Page Break' to split across pages cleanly."
                 className="bg-slate-950 border border-slate-700 rounded-xl p-3 text-white focus:outline-none focus:border-orange-500 font-mono text-xs leading-relaxed"
               />
             </div>
@@ -1114,7 +1204,7 @@ We kindly request you to record this operational declaration and continue our ac
 
               {/* Exact A4 Sheet Page Container */}
               <div
-                className="letterhead-pdf-page relative bg-white text-slate-900 shadow-2xl font-sans"
+                className="letterhead-pdf-page relative bg-white text-slate-900 shadow-2xl font-sans flex flex-col justify-between overflow-hidden"
                 style={{ width: "210mm", height: "297mm", minHeight: "297mm", maxHeight: "297mm" }}
               >
                 {/* Watermark in center of each page */}
@@ -1142,17 +1232,6 @@ We kindly request you to record this operational declaration and continue our ac
                             <span className="text-[11px] font-semibold text-slate-900 font-mono tracking-wider select-all px-1.5 py-0.5 bg-slate-50 border border-slate-200 rounded print:border-none print:p-0 print:bg-transparent">
                               {refNo}
                             </span>
-                            <button
-                              type="button"
-                              onClick={() => openVerificationFor(refNo)}
-                              title="Verify this Reference Number against Firestore Database"
-                              className="no-print text-[9.5px] font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-1.5 py-0.5 rounded cursor-pointer transition-colors flex items-center gap-1 shrink-0"
-                            >
-                              <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                              </svg>
-                              <span>check in DB</span>
-                            </button>
                           </div>
 
                           <div className="flex items-center justify-end gap-2 w-[220px]">
