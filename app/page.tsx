@@ -30,8 +30,13 @@ function getDigitalRoot(numStr: string): number {
 // 2. Digital root of D (e.g. 2+0+2+6+1+0+2+4 = 17 -> 1+7 = 8)
 // 3. Last 3 digits of current timestamp T3 (e.g. 123)
 // 4. x = (T3 / 7) + digitalRoot
-// 5. Multiply D * x, take last 4 digits
-// Format: ZVN<YYYY><MM><DD><4-digit code> (e.g. ZVN202610243328)
+// 5. Product P = Math.floor(D * x), extract last 4 digits (e.g. 3328 -> d1d2 = 33, d3d4 = 28)
+// 6. Series of calculations for ASCII uppercase letter (A-Z, ASCII 65-90):
+//    seed = (P * digitalRoot) + (T3 * 31) + (D % 997)
+//    asciiCode = 65 + (seed % 26) -> e.g. 71 ('G')
+// 7. Insert the generated uppercase ASCII character in between the 4 digits:
+//    suffix = d1d2 + char + d3d4 (e.g. 33G28)
+// Format: ZVN<YYYY><MM><DD><d1d2><CHAR><d3d4> (e.g. ZVN2026102433G28)
 function generateEncryptedRefNo(dateInput?: string, timestampInput?: number): string {
   const d = dateInput ? new Date(dateInput) : new Date();
   const year = isNaN(d.getFullYear()) ? new Date().getFullYear() : d.getFullYear();
@@ -48,10 +53,20 @@ function generateEncryptedRefNo(dateInput?: string, timestampInput?: number): st
   const ts3 = parseInt(last3, 10) || 123;
 
   const x = (ts3 / 7) + digitalRoot;
-  const result = Math.floor(dateNum * x);
-  const last4 = String(result).slice(-4).padStart(4, "0");
+  const product = Math.floor(dateNum * x);
+  const last4 = String(product).slice(-4).padStart(4, "0");
 
-  return `ZVN${dateStr}${last4}`;
+  // Non-linear mathematical calculation for uppercase ASCII character (65 to 90 -> 'A' to 'Z')
+  const seed = (product * digitalRoot) + (ts3 * 31) + (dateNum % 997);
+  const asciiCode = 65 + (Math.abs(Math.floor(seed)) % 26);
+  const char = String.fromCharCode(asciiCode);
+
+  // Insert uppercase English character in between the 4 digits (d1 d2 + char + d3 d4)
+  const d1d2 = last4.slice(0, 2);
+  const d3d4 = last4.slice(2, 4);
+  const finalSuffix = `${d1d2}${char}${d3d4}`;
+
+  return `ZVN${dateStr}${finalSuffix}`;
 }
 
 export default function LetterheadPage() {
@@ -1013,7 +1028,7 @@ We kindly request you to record this operational declaration and continue our ac
                           handleVerifyRefNo();
                         }
                       }}
-                      placeholder="e.g. ZVN202610243328"
+                      placeholder="e.g. ZVN2026102433G28"
                       className="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono tracking-wider placeholder:text-slate-500 focus:outline-none transition-colors"
                     />
                     {verifyQuery && (
