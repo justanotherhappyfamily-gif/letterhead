@@ -1,9 +1,12 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import Image from "next/image";
+import React, { useState, useEffect, useRef } from "react";
+import { toPng } from "html-to-image";
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
+import { TEMPLATES } from "@/lib/templates";
 
-interface SavedLetter {
+export interface SavedLetter {
   id: string;
   refNo: string;
   date: string;
@@ -26,16 +29,6 @@ function getDigitalRoot(numStr: string): number {
 }
 
 // Generates encrypted, pseudo-random reference number following mathematical formula:
-// 1. D = <year><month><day> (e.g. 20261024 or 20260904)
-// 2. Digital root of D (e.g. 2+0+2+6+1+0+2+4 = 17 -> 1+7 = 8)
-// 3. Last 3 digits of current timestamp T3 (e.g. 123)
-// 4. x = (T3 / 7) + digitalRoot
-// 5. Product P = Math.floor(D * x), extract last 4 digits (e.g. 3328 -> d1d2 = 33, d3d4 = 28)
-// 6. Series of calculations for ASCII uppercase letter (A-Z, ASCII 65-90):
-//    seed = (P * digitalRoot) + (T3 * 31) + (D % 997)
-//    asciiCode = 65 + (seed % 26) -> e.g. 71 ('G')
-// 7. Insert the generated uppercase ASCII character in between the 4 digits:
-//    suffix = d1d2 + char + d3d4 (e.g. 33G28)
 // Format: ZVN<YYYY><MM><DD><d1d2><CHAR><d3d4> (e.g. ZVN2026102433G28)
 function generateEncryptedRefNo(dateInput?: string, timestampInput?: number): string {
   const d = dateInput ? new Date(dateInput) : new Date();
@@ -67,6 +60,84 @@ function generateEncryptedRefNo(dateInput?: string, timestampInput?: number): st
   const finalSuffix = `${d1d2}${char}${d3d4}`;
 
   return `ZVN${dateStr}${finalSuffix}`;
+}
+
+// Smart multi-page pagination algorithm
+function paginateLetterText(
+  bodyText: string,
+  density: "normal" | "compact" | "ultra-compact",
+  recipientLines: number
+): string[] {
+  // 1. If explicit page break markers exist, respect them directly
+  if (/---page-break---|\[pagebreak\]/i.test(bodyText)) {
+    const rawPages = bodyText.split(/---page-break---|\[pagebreak\]/i);
+    return rawPages.map((p) => p.trim()).filter((p, idx) => p.length > 0 || idx === 0);
+  }
+
+  // 2. Capacity per page based on density (in estimated line units)
+  // Page 1 capacity: has full header (~140px) + Ref/Date/To/Subject (~130px) + footer (~50px)
+  // Available height on Page 1 ~ 800px.
+  // In normal (11.5px / 19px): ~42 lines.
+  // In compact (10px / 15.5px): ~52 lines.
+  // In ultra-compact (9px / 13.5px): ~62 lines.
+  let page1Capacity = 42;
+  let page2Capacity = 60;
+  if (density === "compact") {
+    page1Capacity = 52;
+    page2Capacity = 75;
+  } else if (density === "ultra-compact") {
+    page1Capacity = 62;
+    page2Capacity = 90;
+  }
+
+  // Adjust Page 1 capacity based on recipient lines (default ~3 lines)
+  page1Capacity = Math.max(25, page1Capacity - (recipientLines - 3) * 1.2);
+
+  // Split into paragraphs / logical blocks
+  const paragraphs = bodyText.split(/\n\n+/);
+
+  // Helper to estimate line count of a text block
+  const estimateLines = (text: string): number => {
+    const rawLines = text.split("\n");
+    let total = 0;
+    for (const line of rawLines) {
+      if (line.trim().length === 0) {
+        total += 0.5;
+      } else {
+        // Approximate ~85 characters per line at standard A4 width
+        const wrapped = Math.ceil(line.length / 85);
+        total += Math.max(1, wrapped);
+      }
+    }
+    return total + 0.6; // paragraph spacing
+  };
+
+  const pages: string[] = [];
+  let currentPageParagraphs: string[] = [];
+  let currentLines = 0;
+  let isFirstPage = true;
+
+  for (const para of paragraphs) {
+    const paraLines = estimateLines(para);
+    const maxCapacity = isFirstPage ? page1Capacity : page2Capacity;
+
+    if (currentLines + paraLines > maxCapacity && currentPageParagraphs.length > 0) {
+      // Current page is full, push to pages
+      pages.push(currentPageParagraphs.join("\n\n"));
+      currentPageParagraphs = [para];
+      currentLines = paraLines;
+      isFirstPage = false;
+    } else {
+      currentPageParagraphs.push(para);
+      currentLines += paraLines;
+    }
+  }
+
+  if (currentPageParagraphs.length > 0) {
+    pages.push(currentPageParagraphs.join("\n\n"));
+  }
+
+  return pages.length > 0 ? pages : [""];
 }
 
 export default function LetterheadPage() {
@@ -134,7 +205,14 @@ Zivic Nexus is in an active, dynamic development stage. We hold the utmost respe
 We kindly request you to record this operational declaration and continue our active payment gateway processing.`
   );
   const [includeSignature, setIncludeSignature] = useState(true);
-  const [density, setDensity] = useState<"normal" | "compact" | "ultra-compact">("normal");
+  const [density, setDensity] = useState<"normal" | "compact" | "ultra-compact">("compact");
+
+  // PDF Generation State
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [pdfSuccess, setPdfSuccess] = useState(false);
+
+  // Editor Panel Expansion State
+  const [showEditorPanel, setShowEditorPanel] = useState(true);
 
   // Cloud & UI State
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -149,6 +227,11 @@ We kindly request you to record this operational declaration and continue our ac
   const [verifyQuery, setVerifyQuery] = useState("");
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<{ found: boolean; letter?: SavedLetter; error?: string } | null>(null);
+
+  // Calculate paginated pages
+  const recipientLineCount = recipient.split("\n").filter(Boolean).length;
+  const pages = paginateLetterText(bodyText, density, recipientLineCount);
+  const totalPages = pages.length;
 
   const handleVerifyRefNo = async (queryToVerify?: string) => {
     const query = (queryToVerify ?? verifyQuery).trim().toUpperCase();
@@ -191,7 +274,7 @@ We kindly request you to record this operational declaration and continue our ac
     }
   }, []);
 
-  // Print handler
+  // Browser Print handler (Ctrl+P or Print Button)
   const handlePrint = () => {
     if (typeof window !== "undefined") {
       window.focus();
@@ -201,7 +284,69 @@ We kindly request you to record this operational declaration and continue our ac
     }
   };
 
-  // Keyboard shortcuts (Ctrl+P for print, Ctrl+S for save)
+  // Direct High-Resolution PDF Download Engine
+  const handleDownloadPdf = async () => {
+    setIsGeneratingPdf(true);
+    try {
+      const pageElements = document.querySelectorAll<HTMLElement>(".letterhead-pdf-page");
+      if (!pageElements || pageElements.length === 0) {
+        throw new Error("No letterhead pages found to export.");
+      }
+
+      // Initialize jsPDF with standard A4 portrait orientation (210mm x 297mm)
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4",
+        compress: true,
+      });
+
+      for (let i = 0; i < pageElements.length; i++) {
+        const pageEl = pageElements[i];
+
+        let imgData: string;
+        try {
+          // Primary engine: html-to-image for pristine vector-grade SVG gradients and crisp fonts
+          imgData = await toPng(pageEl, {
+            quality: 0.98,
+            pixelRatio: 2.5, // 2.5x pixel ratio for 300 DPI razor-sharp print quality
+            cacheBust: true,
+            backgroundColor: "#ffffff",
+          });
+        } catch (captureErr) {
+          console.warn("toPng fallback to html2canvas:", captureErr);
+          // Fallback engine: html2canvas
+          const canvas = await html2canvas(pageEl, {
+            scale: 2.5,
+            useCORS: true,
+            allowTaint: true,
+            backgroundColor: "#ffffff",
+            logging: false,
+          });
+          imgData = canvas.toDataURL("image/png");
+        }
+
+        if (i > 0) {
+          pdf.addPage("a4", "portrait");
+        }
+
+        // Draw image edge-to-edge on A4 sheet
+        pdf.addImage(imgData, "PNG", 0, 0, 210, 297, undefined, "FAST");
+      }
+
+      const safeRef = (refNo || "Letterhead").replace(/[^a-zA-Z0-9_-]/g, "_");
+      pdf.save(`${safeRef}_Official_Letterhead.pdf`);
+      setPdfSuccess(true);
+      setTimeout(() => setPdfSuccess(false), 3000);
+    } catch (err: any) {
+      console.error("PDF generation error:", err);
+      alert("Failed to export PDF: " + (err.message || "Unknown error"));
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
+  // Keyboard shortcuts (Ctrl+P for print, Ctrl+S for save, Ctrl+D for PDF download)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "p") {
@@ -212,10 +357,14 @@ We kindly request you to record this operational declaration and continue our ac
         e.preventDefault();
         handleSaveToCloud();
       }
+      if ((e.ctrlKey || e.metaKey) && e.key === "d") {
+        e.preventDefault();
+        handleDownloadPdf();
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentId, refNo, date, recipient, subject, bodyText, includeSignature]);
+  }, [currentId, refNo, date, recipient, subject, bodyText, includeSignature, density]);
 
   // Load saved letters from Firebase
   const fetchSavedLetters = async () => {
@@ -235,12 +384,10 @@ We kindly request you to record this operational declaration and continue our ac
     }
   };
 
-  // Initial fetch on mount
   useEffect(() => {
     fetchSavedLetters();
   }, []);
 
-  // Update date and regenerate refNo if new document
   const handleDateChange = (newDate: string) => {
     setDate(newDate);
     if (!currentId) {
@@ -264,34 +411,42 @@ We kindly request you to record this operational declaration and continue our ac
           subject,
           bodyText,
           includeSignature,
-          category: "GENERAL",
+          category: "OFFICIAL_LETTER",
         }),
       });
       const data = await res.json();
       if (data.success) {
         setSaveStatus("saved");
-        if (data.letter?.id) {
-          setCurrentId(data.letter.id);
-        }
+        if (data.id) setCurrentId(data.id);
         fetchSavedLetters();
         setTimeout(() => setSaveStatus("idle"), 3000);
       } else {
-        throw new Error(data.error || "Save failed");
+        setSaveStatus("error");
+        setSaveError(data.error || "Failed to save letter");
       }
     } catch (err: any) {
-      console.error("Save error:", err);
       setSaveStatus("error");
-      setSaveError(err.message || "Could not save to Firebase");
-      setTimeout(() => setSaveStatus("idle"), 5000);
+      setSaveError(err.message || "Network error while saving");
     }
   };
 
-  // Delete a saved letter from Firebase
+  // Load saved letter from archive into editor
+  const handleLoadLetter = (item: SavedLetter) => {
+    setCurrentId(item.id);
+    setRefNo(item.refNo);
+    setDate(item.date);
+    setRecipient(item.recipient);
+    setSubject(item.subject);
+    setBodyText(item.bodyText);
+    setIncludeSignature(item.includeSignature ?? true);
+    setShowHistoryModal(false);
+    setSaveStatus("idle");
+  };
+
+  // Delete saved letter from Firebase
   const handleDeleteLetter = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm("Are you sure you want to delete this saved letterhead from Firebase?")) {
-      return;
-    }
+    if (!confirm("Are you sure you want to delete this saved letterhead from the database?")) return;
     try {
       const res = await fetch(`/api/letters/${id}`, { method: "DELETE" });
       const data = await res.json();
@@ -306,42 +461,49 @@ We kindly request you to record this operational declaration and continue our ac
     }
   };
 
-  // Load a selected letter into editor
-  const handleLoadLetter = (item: SavedLetter) => {
-    setCurrentId(item.id);
-    setRefNo(item.refNo || generateEncryptedRefNo(item.date));
-    setDate(item.date || "");
-    setRecipient(item.recipient || "");
-    setSubject(item.subject || "");
-    setBodyText(item.bodyText || "");
-    setIncludeSignature(item.includeSignature !== false);
-    setShowHistoryModal(false);
-  };
-
-  // Clear to new blank letter with encrypted ZVN<YYYY><MM><DD><4-digit>
+  // Reset to blank letter
   const handleNewLetter = () => {
-    setCurrentId(null);
     const today = new Date().toISOString().split("T")[0];
+    setCurrentId(null);
     setDate(today);
     setRefNo(generateEncryptedRefNo(today));
     setRecipient("");
     setSubject("");
     setBodyText("");
     setIncludeSignature(true);
-    setDensity("normal");
+    setSaveStatus("idle");
   };
 
-  // Filtered letters for history search
+  // Load predefined template
+  const handleSelectTemplate = (templateId: string) => {
+    const t = TEMPLATES.find((tpl) => tpl.id === templateId);
+    if (!t) return;
+    setCurrentId(null);
+    const today = new Date().toISOString().split("T")[0];
+    setDate(today);
+    setRefNo(generateEncryptedRefNo(today));
+    setRecipient(t.recipient);
+    setSubject(t.subject);
+    setBodyText(t.bodyText);
+    setIncludeSignature(t.includeSignature);
+    setDensity(t.density);
+  };
+
+  // Insert manual page break marker into text
+  const insertPageBreak = () => {
+    setBodyText((prev) => prev + "\n\n---page-break---\n\n");
+  };
+
   const filteredLetters = savedLetters.filter((item) => {
+    if (!historySearch.trim()) return true;
     const q = historySearch.toLowerCase();
     return (
-      (item.refNo || "").toLowerCase().includes(q) ||
-      (item.subject || "").toLowerCase().includes(q) ||
-      (item.recipient || "").toLowerCase().includes(q)
+      (item.refNo && item.refNo.toLowerCase().includes(q)) ||
+      (item.subject && item.subject.toLowerCase().includes(q)) ||
+      (item.recipient && item.recipient.toLowerCase().includes(q))
     );
   });
 
-  // Dynamic typography classes according to density
   const getRecipientTypography = () => {
     switch (density) {
       case "ultra-compact":
@@ -364,10 +526,243 @@ We kindly request you to record this operational declaration and continue our ac
     }
   };
 
+  // =========================================================================
+  // SUB-COMPONENTS: BANNERS, FOOTERS & HEADERS
+  // =========================================================================
+
+  const TopGeometricBanner = ({ height = 36 }: { height?: number }) => (
+    <div className="relative w-full overflow-hidden shrink-0" style={{ height: `${height}px` }}>
+      <svg className="w-full h-full" viewBox="0 0 1000 45" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="topMaroonGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#550000" />
+            <stop offset="70%" stopColor="#8C1318" />
+            <stop offset="100%" stopColor="#B31D24" />
+          </linearGradient>
+          <linearGradient id="topOrangeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#E65100" />
+            <stop offset="50%" stopColor="#F7941D" />
+            <stop offset="100%" stopColor="#FFA726" />
+          </linearGradient>
+        </defs>
+        <polygon points="0,0 820,0 770,45 0,45" fill="url(#topMaroonGrad)" />
+        <polygon points="820,0 870,0 820,45 770,45" fill="#750E12" />
+        <polygon points="870,0 1000,0 1000,45 820,45" fill="url(#topOrangeGrad)" />
+      </svg>
+    </div>
+  );
+
+  const BottomChevronBanner = () => (
+    <div className="relative w-full h-[28px] overflow-hidden shrink-0">
+      <svg className="w-full h-full" viewBox="0 0 1000 40" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="footerOrangeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#E65100" />
+            <stop offset="50%" stopColor="#F7941D" />
+            <stop offset="100%" stopColor="#FFA726" />
+          </linearGradient>
+          <linearGradient id="footerCenterGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#750E12" />
+            <stop offset="50%" stopColor="#B31D24" />
+            <stop offset="100%" stopColor="#750E12" />
+          </linearGradient>
+        </defs>
+        <rect x="0" y="0" width="1000" height="40" fill="#5A0205" />
+        <polygon points="0,0 150,0 100,40 0,40" fill="url(#footerOrangeGrad)" />
+        <polygon points="140,0 860,0 820,40 90,40" fill="url(#footerCenterGrad)" />
+        <polygon points="850,0 1000,0 1000,40 810,40" fill="url(#footerOrangeGrad)" />
+      </svg>
+    </div>
+  );
+
+  const WebsiteBar = () => (
+    <div className="px-8 pb-1.5 flex items-center justify-center gap-3 shrink-0">
+      <div className="flex-1 flex items-center">
+        <div className="w-1.5 h-1.5 rounded-full bg-[#C0272D]" />
+        <div className="h-[1.5px] flex-1 bg-[#C0272D]" />
+      </div>
+      <div className="flex items-center gap-2 px-3">
+        <svg className="w-3.5 h-3.5 text-[#C0272D]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" strokeWidth="1.8" />
+          <path strokeWidth="1.8" d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
+        </svg>
+        <span className="font-bold text-[11.5px] text-[#C0272D] tracking-wide font-['Montserrat']">
+          www.zivicnexus.com
+        </span>
+      </div>
+      <div className="flex-1 flex items-center">
+        <div className="h-[1.5px] flex-1 bg-[#C0272D]" />
+        <div className="w-1.5 h-1.5 rounded-full bg-[#C0272D]" />
+      </div>
+    </div>
+  );
+
+  const Watermark = () => (
+    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none select-none z-0">
+      <div className="relative w-[380px] h-[250px] opacity-[0.05]">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/logo_clean.png"
+          alt="ZN Watermark"
+          className="w-full h-full object-contain"
+        />
+      </div>
+    </div>
+  );
+
+  const FirstPageHeader = () => (
+    <section className="relative w-full z-10 flex flex-col shrink-0">
+      <TopGeometricBanner height={36} />
+
+      {/* Header Content Grid */}
+      <div className="pt-2.5 pb-2 px-8 flex items-stretch justify-between gap-6">
+        {/* Left: Logo + Name + Taglines */}
+        <div className="flex-1 flex flex-col justify-between pr-2">
+          <div className="flex items-center gap-4">
+            <div className="relative w-[82px] h-[50px] shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/logo_clean.png"
+                alt="Zivic Nexus Logo"
+                className="w-full h-full object-contain"
+              />
+            </div>
+            <div className="relative w-[225px] h-[38px] shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/text_clean.png"
+                alt="Zivic Nexus"
+                className="w-full h-full object-contain"
+              />
+            </div>
+          </div>
+
+          <div className="mt-1.5 pl-1">
+            <p className="text-[11px] font-bold text-[#550C0E] tracking-[0.28em] uppercase font-['Montserrat']">
+              CONNECT &nbsp;·&nbsp; GROW &nbsp;·&nbsp; THRIVE
+            </p>
+          </div>
+
+          <div className="mt-2 flex items-center gap-3 pl-1">
+            <div className="h-[1.5px] flex-1 bg-[#C0272D]" />
+            <span className="text-[9px] font-black text-[#C0272D] tracking-wider uppercase whitespace-nowrap font-['Montserrat']">
+              DIGITAL PLATFORM FOR BUSINESS GROWTH
+            </span>
+            <div className="h-[1.5px] flex-1 bg-[#C0272D]" />
+          </div>
+        </div>
+
+        {/* Vertical Red Divider */}
+        <div className="w-[1.5px] bg-[#C0272D] shrink-0 self-stretch my-1" />
+
+        {/* Right: Contact Details */}
+        <div className="w-[230px] shrink-0 flex flex-col justify-center gap-1.5 pl-2 font-['Montserrat',sans-serif]">
+          <div className="flex items-start gap-2.5">
+            <div className="w-4 h-4 rounded-full bg-[#C0272D] flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+              <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
+              </svg>
+            </div>
+            <div className="text-[9.5px] leading-tight text-slate-800">
+              <p className="font-bold text-[10.5px] text-black tracking-tight">568/390</p>
+              <p className="text-slate-800 font-medium tracking-normal">Om Nagar, Kailashpuri,</p>
+              <p className="text-slate-800 font-medium tracking-normal">Alambagh, Lucknow — 226005</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            <div className="w-4 h-4 rounded-full bg-[#C0272D] flex items-center justify-center shrink-0 shadow-sm">
+              <svg className="w-2 h-2 text-white" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56a.977.977 0 00-1.01.24l-2.2 2.2a15.053 15.053 0 01-6.59-6.59l2.2-2.21a.96.96 0 00.25-1A11.36 11.36 0 018.5 4c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1 0 9.39 7.61 17 17 17 .55 0 1-.45 1-1v-3.5c0-.55-.45-1-1-1z" />
+              </svg>
+            </div>
+            <div className="text-[10px]">
+              <span className="font-bold text-[#C0272D]">Ph: </span>
+              <span className="font-medium text-slate-800">9115233773</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            <div className="w-4 h-4 rounded-full bg-[#C0272D] flex items-center justify-center shrink-0 shadow-sm">
+              <svg className="w-2 h-2 text-white" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" />
+              </svg>
+            </div>
+            <div className="text-[10px]">
+              <span className="font-bold text-[#C0272D]">GSTIN: </span>
+              <span className="font-medium text-slate-800">09LQGPS0132J1ZH</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            <div className="w-4 h-4 rounded-full bg-[#C0272D] flex items-center justify-center shrink-0 shadow-sm">
+              <svg className="w-2 h-2 text-white" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
+              </svg>
+            </div>
+            <div className="text-[9.5px]">
+              <span className="font-bold text-[#C0272D]">Email: </span>
+              <span className="font-medium text-slate-800">zivicnexus@gmail.com</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Full-width Red Separator Line */}
+      <div className="w-full h-[2px] bg-[#C0272D]" />
+    </section>
+  );
+
+  const ContinuationHeader = ({ pageIndex }: { pageIndex: number }) => (
+    <section className="relative w-full z-10 flex flex-col shrink-0">
+      <TopGeometricBanner height={26} />
+      <div className="pt-2 pb-1 px-8 flex items-center justify-between font-['Montserrat']">
+        <div className="flex items-center gap-2">
+          <span className="font-black text-[10.5px] text-[#C0272D] tracking-wider uppercase">
+            ZIVIC NEXUS
+          </span>
+          <span className="text-slate-300">|</span>
+          <span className="text-[9.5px] font-semibold text-slate-600 uppercase tracking-widest">
+            CONTINUATION SHEET
+          </span>
+        </div>
+        <div className="flex items-center gap-3 text-[9.5px] font-semibold text-slate-700">
+          <span>Ref: <strong className="font-mono text-black">{refNo}</strong></span>
+          <span className="text-slate-300">|</span>
+          <span className="text-[#C0272D] font-bold">Page {pageIndex + 1} of {totalPages}</span>
+        </div>
+      </div>
+      <div className="w-full h-[1.5px] bg-[#C0272D]" />
+    </section>
+  );
+
+  const SignatureBlock = () => (
+    <div className="px-8 pb-1 pt-2 flex items-end justify-between shrink-0">
+      <div className="text-[10px] text-slate-700 font-medium leading-tight">
+        <p className="font-semibold text-slate-800">Sincerely,</p>
+        <p className="font-bold text-black mt-0.5">For Zivic Nexus</p>
+        <p className="text-[9px] text-slate-500">Authorized Signatory / Proprietor</p>
+      </div>
+
+      {includeSignature && (
+        <div className="flex flex-col items-center text-center">
+          <div className="relative w-[130px] h-[55px] shrink-0">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/prop_sig_clean.png"
+              alt="Zivic Nexus Proprietor Signature"
+              className="w-full h-full object-contain"
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-slate-950 py-3 sm:py-5 px-2 sm:px-4 flex flex-col items-center justify-start print:p-0 print:m-0 print:bg-white print-wrapper overflow-x-hidden">
       {/* Top Controls Toolbar (Hidden during print) */}
-      <header className="no-print w-full max-w-[210mm] mb-4 bg-slate-900/90 border border-slate-800 backdrop-blur-md rounded-2xl p-3 sm:p-4 shadow-2xl flex flex-col gap-3">
+      <header className="no-print w-full max-w-[210mm] mb-4 bg-slate-900/95 border border-slate-800 backdrop-blur-md rounded-2xl p-3 sm:p-4 shadow-2xl flex flex-col gap-3">
         {/* Top Row: Brand & Status */}
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -381,7 +776,7 @@ We kindly request you to record this operational declaration and continue our ac
                 </h1>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  Multi-Page A4 Ready
+                  {totalPages} {totalPages === 1 ? "Page" : "Pages"} A4 Clean Split
                 </span>
               </div>
               <p className="text-slate-400 text-[11px] sm:text-xs">
@@ -394,7 +789,7 @@ We kindly request you to record this operational declaration and continue our ac
             </div>
           </div>
 
-          {/* Cloud Save Status */}
+          {/* Cloud Save & PDF Status */}
           <div className="flex items-center gap-2">
             {saveStatus === "saving" && (
               <span className="text-xs text-amber-400 flex items-center gap-1.5">
@@ -412,7 +807,12 @@ We kindly request you to record this operational declaration and continue our ac
             )}
             {saveStatus === "error" && (
               <span className="text-xs text-red-400 font-medium max-w-xs truncate" title={saveError || ""}>
-                {saveError?.includes("credentials not found") ? "Configure Firebase on Vercel" : saveError}
+                {saveError}
+              </span>
+            )}
+            {pdfSuccess && (
+              <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1 bg-emerald-500/10 px-2 py-1 rounded-lg border border-emerald-500/20">
+                ✓ Downloaded PDF
               </span>
             )}
           </div>
@@ -422,20 +822,20 @@ We kindly request you to record this operational declaration and continue our ac
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
           {/* Left Actions */}
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Save to Cloud Button */}
+            {/* Save to Cloud */}
             <button
               type="button"
               onClick={handleSaveToCloud}
               disabled={saveStatus === "saving"}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-900/30 transition-all cursor-pointer disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-900/30 transition-all cursor-pointer disabled:opacity-50"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
               </svg>
-              <span>{currentId ? "Update in Cloud" : "Save to Cloud"}</span>
+              <span>{currentId ? "Update Cloud" : "Save to Cloud"}</span>
             </button>
 
-            {/* Saved Letters Archive Button */}
+            {/* Saved Letters Archive */}
             <button
               type="button"
               onClick={() => {
@@ -447,10 +847,10 @@ We kindly request you to record this operational declaration and continue our ac
               <svg className="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
               </svg>
-              <span>Saved Letters ({savedLetters.length})</span>
+              <span>Saved ({savedLetters.length})</span>
             </button>
 
-            {/* Verify Ref. No. Registry Button */}
+            {/* Verify Ref. No */}
             <button
               type="button"
               onClick={() => {
@@ -462,24 +862,45 @@ We kindly request you to record this operational declaration and continue our ac
               <svg className="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
               </svg>
-              <span>Verify Ref. No.</span>
+              <span>Verify Ref</span>
             </button>
 
-            {/* New Blank Letter */}
+            {/* Template Selector */}
+            <div className="flex items-center gap-1.5">
+              <select
+                onChange={(e) => {
+                  if (e.target.value === "blank") {
+                    handleNewLetter();
+                  } else if (e.target.value) {
+                    handleSelectTemplate(e.target.value);
+                  }
+                }}
+                defaultValue=""
+                className="bg-slate-800 text-slate-200 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:border-orange-500 cursor-pointer"
+              >
+                <option value="" disabled>Load Template...</option>
+                <option value="razorpay-compliance">Razorpay Compliance (2 Pages)</option>
+                <option value="sample-proposal">Strategic Growth Proposal (1 Page)</option>
+                <option value="vendor-offer">Vendor Partnership Offer (1 Page)</option>
+                <option value="blank">+ New Blank Letter</option>
+              </select>
+            </div>
+
+            {/* Toggle Editor Panel */}
             <button
               type="button"
-              onClick={handleNewLetter}
-              className="px-2.5 py-1.5 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-all cursor-pointer"
+              onClick={() => setShowEditorPanel(!showEditorPanel)}
+              className="px-2.5 py-1.5 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-all cursor-pointer flex items-center gap-1"
             >
-              New Blank Letter
+              <span>{showEditorPanel ? "Hide Editor" : "Edit Content"}</span>
             </button>
           </div>
 
-          {/* Right Controls */}
+          {/* Right Actions: Text Density, Sig Toggle, PDF Download & Print */}
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Text Size Control */}
+            {/* Text Density Control */}
             <div className="flex items-center gap-1 bg-slate-950/60 p-1 rounded-xl border border-slate-800">
-              <span className="text-slate-400 text-[11px] px-1.5 font-medium">Text Size:</span>
+              <span className="text-slate-400 text-[11px] px-1 font-medium">Density:</span>
               <button
                 type="button"
                 onClick={() => setDensity("normal")}
@@ -519,7 +940,7 @@ We kindly request you to record this operational declaration and continue our ac
             <button
               type="button"
               onClick={() => setIncludeSignature(!includeSignature)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
                 includeSignature
                   ? "bg-blue-600/20 text-blue-300 border-blue-500/40"
                   : "bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700"
@@ -529,342 +950,268 @@ We kindly request you to record this operational declaration and continue our ac
               <span className="font-bold">{includeSignature ? "ON" : "OFF"}</span>
             </button>
 
-            {/* Print / Save PDF Button */}
+            {/* Primary Action: Download Genuine PDF */}
+            <button
+              type="button"
+              onClick={handleDownloadPdf}
+              disabled={isGeneratingPdf}
+              className="flex items-center justify-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-[#C0272D] via-[#D83A41] to-[#F7941D] hover:from-[#A0181E] hover:to-[#E07D0C] text-white shadow-lg shadow-red-900/40 hover:shadow-red-900/60 transition-all cursor-pointer transform active:scale-95 disabled:opacity-50"
+            >
+              {isGeneratingPdf ? (
+                <>
+                  <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                  </svg>
+                  <span>Generating PDF...</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span>Download Official PDF</span>
+                </>
+              )}
+            </button>
+
+            {/* Browser Print Button (Ctrl+P) */}
             <button
               type="button"
               onClick={handlePrint}
-              className="flex items-center justify-center gap-2 px-4 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-[#C0272D] via-[#D83A41] to-[#F7941D] hover:from-[#A0181E] hover:to-[#E07D0C] text-white shadow-lg shadow-red-900/40 hover:shadow-red-900/60 transition-all cursor-pointer transform active:scale-95"
+              title="Browser Print (Ctrl+P)"
+              className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors cursor-pointer"
             >
-              <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
               </svg>
-              <span>Print / Download PDF</span>
             </button>
           </div>
         </div>
       </header>
 
-      {/* A4 Letterhead Preview Container (Auto-expanding multi-page) */}
-      <div className="w-full overflow-x-auto pb-8 custom-scrollbar">
-        <div className="flex justify-start sm:justify-center" style={{ minWidth: "210mm" }}>
-          {/* Main A4 Document Sheet (Auto height for seamless multi-page pagination) */}
-          <main
-            className="a4-container relative flex flex-col justify-between bg-white text-slate-900 shadow-2xl font-sans print:shadow-none print:border-none"
-            style={{ width: "210mm", minHeight: "297mm" }}
-          >
-            {/* Watermark in center of sheet / repeated on all printed pages */}
-            <div className="watermark-container pointer-events-none select-none">
-              <div className="relative w-[420px] h-[270px] opacity-[0.06] print:opacity-[0.05]">
-                <Image
-                  src="/logo_clean.png"
-                  alt="ZN Watermark"
-                  fill
-                  className="object-contain"
-                  priority
-                />
-              </div>
+      {/* Interactive Document Composer / Editor Panel */}
+      {showEditorPanel && (
+        <section className="no-print w-full max-w-[210mm] mb-6 bg-slate-900 border border-slate-800/90 rounded-2xl p-4 shadow-xl flex flex-col gap-3">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                <span>✏️ Document Editor</span>
+              </span>
+              <span className="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded-md">
+                Live multi-page layout sync
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={insertPageBreak}
+                title="Force a clean page break at this point in the letter"
+                className="text-[11px] font-semibold text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 px-2.5 py-1 rounded-lg cursor-pointer transition-colors flex items-center gap-1"
+              >
+                <span>➕ Insert Page Break</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+            {/* Date & Ref No */}
+            <div className="flex flex-col gap-1">
+              <label className="text-slate-400 font-semibold text-[11px]">Letter Date</label>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => handleDateChange(e.target.value)}
+                className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-white font-mono focus:outline-none focus:border-orange-500"
+              />
             </div>
 
-            {/* ========================================================================= */}
-            {/* 1. TOP SECTION (Header - Stays on Page 1)                                  */}
-            {/* ========================================================================= */}
-            <section className="letter-header relative w-full z-10 flex flex-col print:break-inside-avoid">
-              {/* Top Geometric Angular Banner */}
-              <div className="relative w-full h-[38px] overflow-hidden">
-                <svg className="w-full h-full" viewBox="0 0 1000 45" preserveAspectRatio="none">
-                  <defs>
-                    <linearGradient id="topMaroonGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                      <stop offset="0%" stopColor="#550000" />
-                      <stop offset="70%" stopColor="#8C1318" />
-                      <stop offset="100%" stopColor="#B31D24" />
-                    </linearGradient>
-                    <linearGradient id="topOrangeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                      <stop offset="0%" stopColor="#E65100" />
-                      <stop offset="50%" stopColor="#F7941D" />
-                      <stop offset="100%" stopColor="#FFA726" />
-                    </linearGradient>
-                  </defs>
-                  <polygon points="0,0 820,0 770,45 0,45" fill="url(#topMaroonGrad)" />
-                  <polygon points="820,0 870,0 820,45 770,45" fill="#750E12" />
-                  <polygon points="870,0 1000,0 1000,45 820,45" fill="url(#topOrangeGrad)" />
-                </svg>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between">
+                <label className="text-slate-400 font-semibold text-[11px]">Reference Number</label>
+                <button
+                  type="button"
+                  onClick={() => setRefNo(generateEncryptedRefNo(date))}
+                  className="text-[10px] text-blue-400 hover:underline cursor-pointer"
+                >
+                  Regenerate
+                </button>
               </div>
+              <input
+                type="text"
+                value={refNo}
+                onChange={(e) => setRefNo(e.target.value.toUpperCase())}
+                className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-white font-mono font-bold focus:outline-none focus:border-orange-500"
+              />
+            </div>
 
-              {/* Header Content Grid */}
-              <div className="pt-3 pb-2 px-8 flex items-stretch justify-between gap-6">
-                {/* Left Header Area: Logo + Name + Taglines */}
-                <div className="flex-1 flex flex-col justify-between pr-2">
-                  <div className="flex items-center gap-4">
-                    <div className="relative w-[86px] h-[52px] shrink-0">
-                      <Image
-                        src="/logo_clean.png"
-                        alt="Zivic Nexus Logo"
-                        fill
-                        className="object-contain"
-                        priority
-                      />
-                    </div>
-                    <div className="relative w-[235px] h-[40px] shrink-0">
-                      <Image
-                        src="/text_clean.png"
-                        alt="Zivic Nexus"
-                        fill
-                        className="object-contain"
-                        priority
-                      />
-                    </div>
-                  </div>
+            {/* Recipient */}
+            <div className="flex flex-col gap-1 md:col-span-2">
+              <label className="text-slate-400 font-semibold text-[11px]">Recipient Address (To,)</label>
+              <textarea
+                rows={3}
+                value={recipient}
+                onChange={(e) => setRecipient(e.target.value)}
+                placeholder="Recipient Name, Designation & Address..."
+                className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-orange-500 resize-none font-medium"
+              />
+            </div>
 
-                  <div className="mt-2 pl-1.5">
-                    <p className="text-[11.5px] font-bold text-[#550C0E] tracking-[0.28em] uppercase font-['Montserrat']">
-                      CONNECT &nbsp;·&nbsp; GROW &nbsp;·&nbsp; THRIVE
-                    </p>
-                  </div>
+            {/* Subject */}
+            <div className="flex flex-col gap-1 md:col-span-2">
+              <label className="text-slate-400 font-semibold text-[11px]">Subject</label>
+              <input
+                type="text"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                placeholder="Document Subject..."
+                className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-white font-semibold focus:outline-none focus:border-orange-500"
+              />
+            </div>
 
-                  <div className="mt-2.5 flex items-center gap-3 pl-1">
-                    <div className="h-[1.5px] flex-1 bg-[#C0272D]" />
-                    <span className="text-[9.5px] font-black text-[#C0272D] tracking-wider uppercase whitespace-nowrap font-['Montserrat']">
-                      DIGITAL PLATFORM FOR BUSINESS GROWTH
-                    </span>
-                    <div className="h-[1.5px] flex-1 bg-[#C0272D]" />
-                  </div>
-                </div>
-
-                {/* Vertical Red Divider */}
-                <div className="w-[1.5px] bg-[#C0272D] shrink-0 self-stretch my-1" />
-
-                {/* Right Header Area: Contact Details */}
-                <div className="w-[230px] shrink-0 flex flex-col justify-center gap-1.5 pl-2 font-['Montserrat',sans-serif]">
-                  <div className="flex items-start gap-2.5">
-                    <div className="w-4 h-4 rounded-full bg-[#C0272D] flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
-                      <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
-                      </svg>
-                    </div>
-                    <div className="text-[9.5px] leading-tight text-slate-800">
-                      <p className="font-bold text-[10.5px] text-black tracking-tight">568/390</p>
-                      <p className="text-slate-800 font-medium tracking-normal">Om Nagar, Kailashpuri,</p>
-                      <p className="text-slate-800 font-medium tracking-normal">Alambagh, Lucknow — 226005</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-4 h-4 rounded-full bg-[#C0272D] flex items-center justify-center shrink-0 shadow-sm">
-                      <svg className="w-2 h-2 text-white" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56a.977.977 0 00-1.01.24l-2.2 2.2a15.053 15.053 0 01-6.59-6.59l2.2-2.21a.96.96 0 00.25-1A11.36 11.36 0 018.5 4c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1 0 9.39 7.61 17 17 17 .55 0 1-.45 1-1v-3.5c0-.55-.45-1-1-1z" />
-                      </svg>
-                    </div>
-                    <div className="text-[10px]">
-                      <span className="font-bold text-[#C0272D]">Ph: </span>
-                      <span className="font-medium text-slate-800">9115233773</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-4 h-4 rounded-full bg-[#C0272D] flex items-center justify-center shrink-0 shadow-sm">
-                      <svg className="w-2 h-2 text-white" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" />
-                      </svg>
-                    </div>
-                    <div className="text-[10px]">
-                      <span className="font-bold text-[#C0272D]">GSTIN: </span>
-                      <span className="font-medium text-slate-800">09LQGPS0132J1ZH</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-4 h-4 rounded-full bg-[#C0272D] flex items-center justify-center shrink-0 shadow-sm">
-                      <svg className="w-2 h-2 text-white" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
-                      </svg>
-                    </div>
-                    <div className="text-[9.5px]">
-                      <span className="font-bold text-[#C0272D]">Email: </span>
-                      <span className="font-medium text-slate-800">zivicnexus@gmail.com</span>
-                    </div>
-                  </div>
+            {/* Letter Body */}
+            <div className="flex flex-col gap-1 md:col-span-2">
+              <div className="flex items-center justify-between">
+                <label className="text-slate-400 font-semibold text-[11px]">Letter Body Content</label>
+                <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
+                  <span>{bodyText.length} characters</span>
+                  <span>•</span>
+                  <span>{bodyText.split(/\s+/).filter(Boolean).length} words</span>
+                  <span>•</span>
+                  <span className="text-emerald-400 font-bold">{totalPages} A4 {totalPages === 1 ? "page" : "pages"}</span>
                 </div>
               </div>
+              <textarea
+                rows={12}
+                value={bodyText}
+                onChange={(e) => setBodyText(e.target.value)}
+                placeholder="Type your official letterhead content here. Use '---page-break---' to split across pages manually if required."
+                className="bg-slate-950 border border-slate-700 rounded-xl p-3 text-white focus:outline-none focus:border-orange-500 font-mono text-xs leading-relaxed"
+              />
+            </div>
+          </div>
+        </section>
+      )}
 
-              {/* Full-width Red Separator Line */}
-              <div className="w-full h-[2px] bg-[#C0272D]" />
-            </section>
+      {/* A4 Letterhead Preview Container (Discrete Multi-Page Sheets) */}
+      <div className="w-full flex flex-col items-center gap-8 pb-12">
+        {pages.map((pageContent, pageIndex) => {
+          const isFirstPage = pageIndex === 0;
+          const isLastPage = pageIndex === totalPages - 1;
 
-            {/* ========================================================================= */}
-            {/* 2. BODY SECTION (Auto Multi-Page Pagination Flow)                         */}
-            {/* ========================================================================= */}
-            <section className="letter-body relative flex-1 px-8 py-3 z-10 flex flex-col justify-between print:break-inside-auto">
-              {/* Form Fields & Content */}
-              <div className="relative z-10 flex flex-col">
-                {/* Row 1: Strict Encrypted Ref. No. & Date */}
-                <div className="flex items-center justify-between gap-6 pb-2 print:break-inside-avoid">
-                  <div className="flex items-center gap-2 flex-1 max-w-[420px]">
-                    <span className="font-bold text-[11px] text-black whitespace-nowrap font-['Montserrat']">
-                      Ref. No. :
-                    </span>
-                    <span className="text-[11px] font-semibold text-slate-900 font-mono tracking-wider select-all px-1.5 py-0.5 bg-slate-50 border border-slate-200 rounded print:border-none print:p-0 print:bg-transparent">
-                      {refNo}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => openVerificationFor(refNo)}
-                      title="Verify this Reference Number against Firestore Database"
-                      className="no-print text-[9.5px] font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-1.5 py-0.5 rounded cursor-pointer transition-colors flex items-center gap-1 shrink-0"
-                    >
-                      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                      </svg>
-                      <span>check in DB</span>
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-end gap-2 w-[220px]">
-                    <span className="font-bold text-[11px] text-black whitespace-nowrap font-['Montserrat']">
-                      Date :
-                    </span>
-                    <input
-                      type="text"
-                      value={date}
-                      onChange={(e) => handleDateChange(e.target.value)}
-                      placeholder="YYYY-MM-DD"
-                      className="print:hidden flex-1 text-[11px] text-slate-800 border-b border-slate-300 focus:border-[#C0272D] bg-transparent focus:outline-none px-1 py-0.5 font-medium text-right transition-colors"
-                    />
-                    <span className="hidden print:inline text-[11px] font-medium text-slate-900 text-right">
-                      {date}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Row 2: To, & Recipient */}
-                <div className="pt-0.5 print:break-inside-avoid">
-                  <span className="font-bold text-[11px] text-black font-['Montserrat']">
-                    To,
-                  </span>
-                </div>
-                <div className="pt-0.5 pb-1.5 print:break-inside-avoid">
-                  <textarea
-                    value={recipient}
-                    onChange={(e) => setRecipient(e.target.value)}
-                    rows={density === "ultra-compact" ? 2 : 3}
-                    placeholder="Recipient Name, Designation & Address..."
-                    className={`print:hidden w-full max-w-[480px] ${getRecipientTypography()} text-slate-800 bg-transparent border border-transparent hover:border-slate-200 focus:border-slate-400 rounded-md p-0.5 focus:outline-none font-medium resize-none transition-all placeholder:italic placeholder:text-slate-400 overflow-hidden`}
-                  />
-                  <div className={`hidden print:block whitespace-pre-wrap ${getRecipientTypography()} text-slate-800 font-medium`}>
-                    {recipient}
-                  </div>
-                </div>
-
-                {/* Row 3: Subject : */}
-                <div className="pt-0.5 pb-1.5 flex items-start gap-2 print:break-inside-avoid">
-                  <span className="font-bold text-[11px] text-black whitespace-nowrap font-['Montserrat'] mt-0.5">
-                    Subject :
-                  </span>
-                  <input
-                    type="text"
-                    value={subject}
-                    onChange={(e) => setSubject(e.target.value)}
-                    placeholder="Enter document subject here..."
-                    className="print:hidden flex-1 text-[11px] text-slate-900 border-b border-slate-300 focus:border-[#C0272D] bg-transparent focus:outline-none px-1 py-0.5 font-bold transition-colors placeholder:font-normal placeholder:italic placeholder:text-slate-400"
-                  />
-                  <span className="hidden print:inline text-[11px] font-bold text-slate-900">
-                    {subject}
-                  </span>
-                </div>
-
-                {/* Main Letter Body Space */}
-                <div className="pt-1">
-                  {/* Screen Editable Textarea with auto expandable min-height */}
-                  <textarea
-                    value={bodyText}
-                    onChange={(e) => setBodyText(e.target.value)}
-                    rows={18}
-                    placeholder="Type your letter content here..."
-                    className={`print:hidden w-full min-h-[380px] ${getBodyTypography()} text-slate-800 bg-transparent border border-slate-200 hover:border-slate-300 focus:border-slate-400 rounded-lg p-2 focus:outline-none font-sans resize-y transition-all placeholder:italic placeholder:text-slate-400`}
-                  />
-                  {/* Print View: Continuous paragraph flow that naturally breaks into Page 2, Page 3 */}
-                  <div className={`hidden print:block whitespace-pre-wrap ${getBodyTypography()} text-slate-800 font-sans print:break-words print:break-inside-auto`}>
-                    {bodyText}
-                  </div>
-                </div>
+          return (
+            <div key={pageIndex} className="flex flex-col items-center">
+              {/* Screen Page Badge */}
+              <div className="no-print mb-2 flex items-center justify-between w-full max-w-[210mm] px-2 text-slate-400 text-xs font-semibold">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-orange-500" />
+                  Official Sheet {pageIndex + 1} of {totalPages}
+                </span>
+                <span className="font-mono text-[11px] text-slate-500">
+                  {isFirstPage ? "Primary Letterhead" : "Continuation Sheet"}
+                </span>
               </div>
 
-            </section>
+              {/* Exact A4 Sheet Page Container */}
+              <div
+                className="letterhead-pdf-page relative bg-white text-slate-900 shadow-2xl font-sans"
+                style={{ width: "210mm", height: "297mm", minHeight: "297mm", maxHeight: "297mm" }}
+              >
+                {/* Watermark in center of each page */}
+                <Watermark />
 
-            {/* ========================================================================= */}
-            {/* 3. RUNNING BOTTOM FOOTER (Signature + Stamp + Bottom Banner)              */}
-            {/* Fixed at the bottom of EVERY printed page, anchored at bottom on screen   */}
-            {/* ========================================================================= */}
-            <footer className="letter-running-footer relative w-full z-20 flex flex-col justify-end">
-              {/* Sign-off & Proprietor Stamp */}
-              <div className="letter-signature px-8 pb-1.5 flex items-end justify-between">
-                <div className="text-[10px] text-slate-700 font-medium leading-tight">
-                  <p className="font-semibold text-slate-800">Sincerely,</p>
-                  <p className="font-bold text-black mt-0.5">For Zivic Nexus</p>
-                  <p className="text-[9px] text-slate-500">Authorized Signatory / Proprietor</p>
-                </div>
-
-                {includeSignature && (
-                  <div className="flex flex-col items-center text-center">
-                    <div className="relative w-[130px] h-[55px] shrink-0">
-                      <Image
-                        src="/prop_sig_clean.png"
-                        alt="Zivic Nexus Proprietor Signature"
-                        fill
-                        className="object-contain"
-                        priority
-                      />
-                    </div>
-                  </div>
+                {/* Top Section Header */}
+                {isFirstPage ? (
+                  <FirstPageHeader />
+                ) : (
+                  <ContinuationHeader pageIndex={pageIndex} />
                 )}
-              </div>
 
-              {/* Official Website Divider & Chevron Banner */}
-              <div className="letter-footer relative w-full flex flex-col">
-                <div className="px-8 pb-1.5 flex items-center justify-center gap-3">
-                  <div className="flex-1 flex items-center">
-                    <div className="w-1.5 h-1.5 rounded-full bg-[#C0272D]" />
-                    <div className="h-[1.5px] flex-1 bg-[#C0272D]" />
-                  </div>
-                  <div className="flex items-center gap-2 px-3">
-                    <svg className="w-3.5 h-3.5 text-[#C0272D]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <circle cx="12" cy="12" r="10" strokeWidth="1.8" />
-                      <path strokeWidth="1.8" d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
-                    </svg>
-                    <span className="font-bold text-[12px] text-[#C0272D] tracking-wide font-['Montserrat']">
-                      www.zivicnexus.com
-                    </span>
-                  </div>
-                  <div className="flex-1 flex items-center">
-                    <div className="h-[1.5px] flex-1 bg-[#C0272D]" />
-                    <div className="w-1.5 h-1.5 rounded-full bg-[#C0272D]" />
-                  </div>
-                </div>
+                {/* Body Content Section */}
+                <section className="relative flex-1 px-8 py-2.5 z-10 flex flex-col justify-between overflow-hidden">
+                  <div className="relative z-10 flex flex-col">
+                    {/* First Page Metadata */}
+                    {isFirstPage && (
+                      <div className="flex flex-col pb-2">
+                        {/* Ref No & Date */}
+                        <div className="flex items-center justify-between gap-6 pb-2">
+                          <div className="flex items-center gap-2 flex-1 max-w-[420px]">
+                            <span className="font-bold text-[11px] text-black whitespace-nowrap font-['Montserrat']">
+                              Ref. No. :
+                            </span>
+                            <span className="text-[11px] font-semibold text-slate-900 font-mono tracking-wider select-all px-1.5 py-0.5 bg-slate-50 border border-slate-200 rounded print:border-none print:p-0 print:bg-transparent">
+                              {refNo}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => openVerificationFor(refNo)}
+                              title="Verify this Reference Number against Firestore Database"
+                              className="no-print text-[9.5px] font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-1.5 py-0.5 rounded cursor-pointer transition-colors flex items-center gap-1 shrink-0"
+                            >
+                              <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                              </svg>
+                              <span>check in DB</span>
+                            </button>
+                          </div>
 
-                {/* Bottom Geometric Chevron Banner */}
-                <div className="relative w-full h-[28px] overflow-hidden">
-                  <svg className="w-full h-full" viewBox="0 0 1000 40" preserveAspectRatio="none">
-                    <defs>
-                      <linearGradient id="footerOrangeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                        <stop offset="0%" stopColor="#E65100" />
-                        <stop offset="50%" stopColor="#F7941D" />
-                        <stop offset="100%" stopColor="#FFA726" />
-                      </linearGradient>
-                      <linearGradient id="footerCenterGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                        <stop offset="0%" stopColor="#750E12" />
-                        <stop offset="50%" stopColor="#B31D24" />
-                        <stop offset="100%" stopColor="#750E12" />
-                      </linearGradient>
-                    </defs>
-                    <rect x="0" y="0" width="1000" height="40" fill="#5A0205" />
-                    <polygon points="0,0 150,0 100,40 0,40" fill="url(#footerOrangeGrad)" />
-                    <polygon points="140,0 860,0 820,40 90,40" fill="url(#footerCenterGrad)" />
-                    <polygon points="850,0 1000,0 1000,40 810,40" fill="url(#footerOrangeGrad)" />
-                  </svg>
-                </div>
+                          <div className="flex items-center justify-end gap-2 w-[220px]">
+                            <span className="font-bold text-[11px] text-black whitespace-nowrap font-['Montserrat']">
+                              Date :
+                            </span>
+                            <span className="text-[11px] font-medium text-slate-900 text-right">
+                              {date}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* To, & Recipient */}
+                        <div className="pt-0.5">
+                          <span className="font-bold text-[11px] text-black font-['Montserrat']">
+                            To,
+                          </span>
+                        </div>
+                        <div className="pt-0.5 pb-1.5">
+                          <div className={`whitespace-pre-wrap ${getRecipientTypography()} text-slate-800 font-medium`}>
+                            {recipient}
+                          </div>
+                        </div>
+
+                        {/* Subject */}
+                        <div className="pt-0.5 pb-1 flex items-start gap-2">
+                          <span className="font-bold text-[11px] text-black whitespace-nowrap font-['Montserrat'] mt-0.5">
+                            Subject :
+                          </span>
+                          <span className="text-[11px] font-bold text-slate-900 leading-snug">
+                            {subject}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Page Letter Body Content */}
+                    <div className="pt-1">
+                      <div className={`whitespace-pre-wrap ${getBodyTypography()} text-slate-800 font-sans leading-relaxed`}>
+                        {pageContent}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Signature on Final Page only */}
+                  {isLastPage && (
+                    <SignatureBlock />
+                  )}
+                </section>
+
+                {/* Running Bottom Footer (Always anchored at bottom of each page) */}
+                <footer className="relative w-full z-20 flex flex-col justify-end shrink-0">
+                  <WebsiteBar />
+                  <BottomChevronBanner />
+                </footer>
               </div>
-            </footer>
-          </main>
-        </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* ========================================================================= */}
