@@ -1,8 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useTransition } from "react";
+import React, { useState, useEffect } from "react";
 import Image from "next/image";
-import { TEMPLATES, LetterTemplate } from "@/lib/templates";
 
 interface SavedLetter {
   id: string;
@@ -21,10 +20,74 @@ export default function LetterheadPage() {
   // Current active letter state
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [refNo, setRefNo] = useState("ZN/COMPL/RZP/2026/10-01");
-  const [date, setDate] = useState("2026-10-24");
-  const [recipient, setRecipient] = useState(TEMPLATES[0].recipient);
-  const [subject, setSubject] = useState(TEMPLATES[0].subject);
-  const [bodyText, setBodyText] = useState(TEMPLATES[0].bodyText);
+  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [recipient, setRecipient] = useState(
+    "The Risk & Compliance Division / Merchant Underwriting\nRazorpay Software Private Limited\nSJR Cyber, 1st Floor, 22 Laskar-Hosur Road,\nAdugodi, Bengaluru, Karnataka – 560030"
+  );
+  const [subject, setSubject] = useState(
+    "Formal Clarification & Undertaking: Operational Architecture (B2B/B2C), Platform as a Service, and Gateway Usage (Ph: 9115233773 | zivicnexus.com)"
+  );
+  const [bodyText, setBodyText] = useState(
+    `Dear Razorpay Compliance Team,
+
+With reference to your communication regarding our merchant account (Phone: 9115233773) and the operational scope of our platform (https://zivicnexus.com), we are pleased to provide this comprehensive declaration detailing our business model, Platform-as-a-Service architecture, and payment gateway utilization.
+
+1. OPERATIONAL ARCHITECTURE: B2B AND B2C MODELS
+Zivic Nexus operates as a dual-sided service marketplace and Platform-as-a-Service (PaaS). Our platform accommodates both B2B and B2C engagements through distinct operational pathways:
+• How the Platform Functions as B2B:
+  (a) Inter-Business Discovery: Corporate entities and enterprises utilize the platform to discover, vet, and contract specialized B2B service providers (e.g., commercial event management, digital marketing, corporate branding, and enterprise IT).
+  (b) Web Applications & Digital Solutions: Zivic Nexus directly designs and develops custom websites, web applications, and digital infrastructure for MSMEs and corporate clients.
+• How the Platform Functions as B2C:
+  Individual retail consumers (seeking wedding planners, personal event coordinators, creative designers, or photographers) interact with our platform through two transparent engagement models:
+  - Model A (Direct Vendor Connection): The client freely browses and directly contacts registered individual vendors. In this model, Zivic Nexus charges ZERO platform fees and ZERO commission from the client, and ZERO fee from the vendor. This direct interaction is 100% free of charge.
+  - Model B (Managed Direct Fulfillment by Zivic Nexus): A client may opt to assign their inquiry directly to Zivic Nexus. In this managed model, Zivic Nexus takes complete end-to-end contractual responsibility for the quality and delivery of the service, coordinating execution with verified registered vendors in the background. Zivic Nexus provides complete project governance, structured documentation, and statutory Rule 46 GST tax invoices directly to the client, providing consumers with an effortless, fully accountable service experience.
+• Platform as a Service (PaaS) & Business Aid Tools:
+  For clients, Zivic Nexus is a Platform as a Service with zero platform fees. For registered service providers, the platform acts as an operational hub offering business aid tools—including AI inquiry management, business health diagnostics, client proposal generators, and digital presence tools.
+
+2. MULTI-CATEGORY MARKETPLACE CONVENIENCE
+To ensure effortless navigation for our users, Zivic Nexus organizes vendors into distinct service categories (Event Management, Creative Solutions, Web Development, Digital Marketing, etc.). We welcome diverse qualified service providers to participate on the platform. While Event Marketing & Digital Solutions is currently our most active dominating vertical, the underlying business model, fee structure, payment workflows, and compliance procedures remain identical across all categories. The categorization exists solely for client search convenience.
+
+3. TWO-TIER VERIFICATION SYSTEM FOR CLIENTS AND VENDORS
+Trust and consumer safety are core to our platform:
+• Tier 1 (Mandatory Verification for All Users): Every client and vendor interacting on our platform must be authenticated via dual-factor verification (verified email address and active WhatsApp mobile OTP confirmation).
+• Tier 2 (Advanced Identity Verification): We provide an optional, non-mandatory second layer of trust verification for both vendors and clients. Under this tier, identity documents are cross-verified against a live facial photo by platform administrators to award verified trust badges. In strict adherence to data privacy standards (DPDP Act, 2023), identity documents are instantly and permanently purged from our servers immediately following administrative review.
+
+4. MARKET OPPORTUNITY & AI LEAD DISCOVERY WORKFLOW
+Regarding the opportunity and lead discovery features available on our platform:
+• Nature of Inquiries: Leads pertain strictly to genuine commercial service requirements, such as event planning, web development, and digital marketing contracts.
+• Transparent AI + Human Discovery Workflow:
+  (a) Contextual Search Query Generation: Our AI analyzes a vendor’s profile, service niche, and business analytics to formulate intelligent search queries for publicly advertised business requirements.
+  (b) Public Job Sourcing: Using these targeted queries, the platform scans publicly accessible online channels and open business forums where clients have posted public requests for work.
+  (c) Mandatory Human Review & Filtering: Automated search results are never passed directly to vendors. An internal human review team manually examines every identified opportunity to verify authenticity, filter out spam or duplicates, and confirm legitimacy.
+  (d) Secure Delivery to Verified Vendors: Only after passing human verification is the opportunity shared with the subscribed, double-verified vendor via secure email/WhatsApp notification.
+  (e) Direct Inquiries: In addition, vendors receive direct, authenticated inquiries submitted directly by verified clients on our platform.
+• Non-Distribution Assurance: We do not sell, scrape, or distribute telemarketing databases, cold-calling lists, or private personal data to external parties.
+
+5. WEB DESIGN & MANAGED DIGITAL SERVICES
+Zivic Nexus operates an in-house digital production division providing custom web development, web application engineering, and managed cloud infrastructure for businesses and entrepreneurs. The Razorpay payment gateway is utilized to collect milestone-based project payments and hosting care plan fees, all backed by official GST tax invoices under GSTIN: 09LQGPS0132J1ZH.
+
+6. PAYMENT GATEWAY UTILIZATION SUMMARY
+The payment gateway is deployed strictly for:
+(a) Vendor SaaS Subscriptions: Tiered recurring packages (Growth Pro, Premium, Titan, and Elite) granting access to software features, business aid tools, and inquiry management.
+(b) Pay-As-You-Go Usage: One-time micro-credits for on-demand AI business analysis and market discovery runs.
+(c) Managed Web Design & Digital Services: Project milestone payments for contracted web application development and digital execution.
+(Note: As emphasized, direct client-to-vendor inquiries incur zero platform fees or transaction charges.)
+
+7. COMMITMENT TO COMPLIANCE & OPEN COLLABORATION
+Zivic Nexus is in an active, dynamic development stage. We hold the utmost respect for Razorpay’s risk governance, compliance mandates, and merchant onboarding guidelines. If your underwriting or compliance team recommends any specific adjustments to our website disclosures, tier nomenclature, or feature presentation, our management team is fully receptive, cooperative, and committed to executing them promptly.
+
+We kindly request you to record this operational declaration and continue our active payment gateway processing.
+
+Sincerely,
+
+For Zivic Nexus
+Authorized Signatory
+Designation: Founder & Managing Director
+Phone: +91-9115233773
+Email: zivicnexus@gmail.com
+Website: https://zivicnexus.com
+Registered Address: 568/390, Om Nagar, Kailashpuri, Alambagh, Lucknow – 226005`
+  );
   const [includeSignature, setIncludeSignature] = useState(true);
   const [density, setDensity] = useState<"normal" | "compact" | "ultra-compact">("ultra-compact");
 
@@ -35,7 +98,6 @@ export default function LetterheadPage() {
   const [savedLetters, setSavedLetters] = useState<SavedLetter[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [historySearch, setHistorySearch] = useState("");
-  const [, startTransition] = useTransition();
 
   // Print handler
   const handlePrint = () => {
@@ -151,7 +213,6 @@ export default function LetterheadPage() {
     setSubject(item.subject || "");
     setBodyText(item.bodyText || "");
     setIncludeSignature(item.includeSignature !== false);
-    // Estimate density based on length
     if ((item.bodyText || "").length > 2500) {
       setDensity("ultra-compact");
     } else if ((item.bodyText || "").length > 1200) {
@@ -162,23 +223,15 @@ export default function LetterheadPage() {
     setShowHistoryModal(false);
   };
 
-  // Apply a template
-  const handleApplyTemplate = (tpl: LetterTemplate) => {
-    setCurrentId(null);
-    setRefNo(`${tpl.refNoPrefix}/2026/10-01`);
-    setDate(new Date().toISOString().split("T")[0]);
-    setRecipient(tpl.recipient);
-    setSubject(tpl.subject);
-    setBodyText(tpl.bodyText);
-    setIncludeSignature(tpl.includeSignature);
-    setDensity(tpl.density);
-  };
-
-  // Clear to new blank letter
+  // Clear to new blank letter with automated serial Ref No
   const handleNewLetter = () => {
     setCurrentId(null);
-    setRefNo(`ZN/GEN/${new Date().getFullYear()}/${String(new Date().getMonth() + 1).padStart(2, "0")}-01`);
-    setDate(new Date().toISOString().split("T")[0]);
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const count = String(savedLetters.length + 1).padStart(3, "0");
+    setRefNo(`ZN/${year}/${month}/${count}`);
+    setDate(d.toISOString().split("T")[0]);
     setRecipient("");
     setSubject("");
     setBodyText("");
@@ -220,7 +273,7 @@ export default function LetterheadPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 py-4 sm:py-6 px-2 sm:px-4 flex flex-col items-center justify-start print:p-0 print:m-0 print:bg-white print-wrapper overflow-x-hidden">
+    <div className="min-h-screen bg-slate-950 py-3 sm:py-5 px-2 sm:px-4 flex flex-col items-center justify-start print:p-0 print:m-0 print:bg-white print-wrapper overflow-x-hidden">
       {/* Top Controls Toolbar (Hidden during print) */}
       <header className="no-print w-full max-w-[210mm] mb-4 bg-slate-900/90 border border-slate-800 backdrop-blur-md rounded-2xl p-3 sm:p-4 shadow-2xl flex flex-col gap-3">
         {/* Top Row: Brand & Status */}
@@ -243,7 +296,7 @@ export default function LetterheadPage() {
                 {currentId ? (
                   <span className="text-blue-400">Editing saved letter in Firebase</span>
                 ) : (
-                  <span>New uncommitted document • Click to edit fields</span>
+                  <span>Ref No. is automatically managed • Click and edit letter content</span>
                 )}
               </p>
             </div>
@@ -273,65 +326,10 @@ export default function LetterheadPage() {
           </div>
         </div>
 
-        {/* Middle Row: Templates & Text Size Controls */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-xs">
-          {/* Templates Selector */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-slate-400 font-medium">Template:</span>
-            {TEMPLATES.map((tpl) => (
-              <button
-                key={tpl.id}
-                type="button"
-                onClick={() => handleApplyTemplate(tpl)}
-                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors cursor-pointer"
-              >
-                {tpl.name}
-              </button>
-            ))}
-          </div>
-
-          {/* Text Density Control (Critical for 1-page A4 fitting) */}
-          <div className="flex items-center gap-1 bg-slate-950/60 p-1 rounded-xl border border-slate-800">
-            <span className="text-slate-400 text-[11px] px-1.5 font-medium">Text Size:</span>
-            <button
-              type="button"
-              onClick={() => setDensity("normal")}
-              className={`px-2 py-0.5 rounded-lg text-[11px] font-medium transition-all cursor-pointer ${
-                density === "normal"
-                  ? "bg-[#C0272D] text-white shadow-sm"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              Normal
-            </button>
-            <button
-              type="button"
-              onClick={() => setDensity("compact")}
-              className={`px-2 py-0.5 rounded-lg text-[11px] font-medium transition-all cursor-pointer ${
-                density === "compact"
-                  ? "bg-[#C0272D] text-white shadow-sm"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              Compact
-            </button>
-            <button
-              type="button"
-              onClick={() => setDensity("ultra-compact")}
-              className={`px-2 py-0.5 rounded-lg text-[11px] font-medium transition-all cursor-pointer ${
-                density === "ultra-compact"
-                  ? "bg-[#C0272D] text-white shadow-sm"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              Ultra-Fit (Long Letters)
-            </button>
-          </div>
-        </div>
-
-        {/* Bottom Row: Actions (Save, Archive, Sig, New, Print) */}
+        {/* Action Controls Row */}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
-          <div className="flex items-center gap-2">
+          {/* Left Actions */}
+          <div className="flex items-center gap-2 flex-wrap">
             {/* Save to Cloud Button */}
             <button
               type="button"
@@ -357,7 +355,7 @@ export default function LetterheadPage() {
               <svg className="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
               </svg>
-              <span>Archive ({savedLetters.length})</span>
+              <span>Saved Letters ({savedLetters.length})</span>
             </button>
 
             {/* New Blank Letter */}
@@ -366,11 +364,50 @@ export default function LetterheadPage() {
               onClick={handleNewLetter}
               className="px-2.5 py-1.5 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-all cursor-pointer"
             >
-              New Blank
+              New Blank Letter
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* Right Controls */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Text Size Control */}
+            <div className="flex items-center gap-1 bg-slate-950/60 p-1 rounded-xl border border-slate-800">
+              <span className="text-slate-400 text-[11px] px-1.5 font-medium">Text Size:</span>
+              <button
+                type="button"
+                onClick={() => setDensity("normal")}
+                className={`px-2 py-0.5 rounded-lg text-[11px] font-medium transition-all cursor-pointer ${
+                  density === "normal"
+                    ? "bg-[#C0272D] text-white shadow-sm"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                Normal
+              </button>
+              <button
+                type="button"
+                onClick={() => setDensity("compact")}
+                className={`px-2 py-0.5 rounded-lg text-[11px] font-medium transition-all cursor-pointer ${
+                  density === "compact"
+                    ? "bg-[#C0272D] text-white shadow-sm"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                Compact
+              </button>
+              <button
+                type="button"
+                onClick={() => setDensity("ultra-compact")}
+                className={`px-2 py-0.5 rounded-lg text-[11px] font-medium transition-all cursor-pointer ${
+                  density === "ultra-compact"
+                    ? "bg-[#C0272D] text-white shadow-sm"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                Ultra-Fit
+              </button>
+            </div>
+
             {/* Signature Toggle */}
             <button
               type="button"
@@ -552,20 +589,14 @@ export default function LetterheadPage() {
 
               {/* Top Form Fields */}
               <div className="relative z-10 flex flex-col">
-                {/* Row 1: Ref. No. & Date */}
+                {/* Row 1: Non-editable Ref. No. & Date */}
                 <div className="flex items-center justify-between gap-6 pb-2">
                   <div className="flex items-center gap-2 flex-1 max-w-[340px]">
                     <span className="font-bold text-[11px] text-black whitespace-nowrap font-['Montserrat']">
                       Ref. No. :
                     </span>
-                    <input
-                      type="text"
-                      value={refNo}
-                      onChange={(e) => setRefNo(e.target.value)}
-                      placeholder="ZN/COMPL/..."
-                      className="print:hidden flex-1 text-[11px] text-slate-800 border-b border-slate-300 focus:border-[#C0272D] bg-transparent focus:outline-none px-1 py-0.5 font-medium transition-colors"
-                    />
-                    <span className="hidden print:inline text-[11px] font-medium text-slate-900">
+                    {/* Non-editable Ref. No. Text */}
+                    <span className="text-[11px] font-semibold text-slate-900 font-mono tracking-wide select-all px-1 py-0.5">
                       {refNo}
                     </span>
                   </div>
