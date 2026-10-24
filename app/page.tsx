@@ -16,14 +16,42 @@ interface SavedLetter {
   createdAt?: string;
 }
 
-// Generates reference number in format: ZVN<YYYY><MM><DD><counter starting from 1000>
-function generateRefNo(dateInput?: string, count: number = 0): string {
+// Calculate digital root (sum of digits repeatedly until single digit)
+function getDigitalRoot(numStr: string): number {
+  let sum = numStr.split("").reduce((acc, ch) => acc + (parseInt(ch, 10) || 0), 0);
+  while (sum >= 10) {
+    sum = String(sum).split("").reduce((acc, ch) => acc + (parseInt(ch, 10) || 0), 0);
+  }
+  return sum;
+}
+
+// Generates encrypted, pseudo-random reference number following mathematical formula:
+// 1. D = <year><month><day> (e.g. 20261024 or 20260904)
+// 2. Digital root of D (e.g. 2+0+2+6+1+0+2+4 = 17 -> 1+7 = 8)
+// 3. Last 3 digits of current timestamp T3 (e.g. 123)
+// 4. x = (T3 / 7) + digitalRoot
+// 5. Multiply D * x, take last 4 digits
+// Format: ZVN<YYYY><MM><DD><4-digit code> (e.g. ZVN202610243328)
+function generateEncryptedRefNo(dateInput?: string, timestampInput?: number): string {
   const d = dateInput ? new Date(dateInput) : new Date();
   const year = isNaN(d.getFullYear()) ? new Date().getFullYear() : d.getFullYear();
   const month = String(isNaN(d.getMonth()) ? new Date().getMonth() + 1 : d.getMonth() + 1).padStart(2, "0");
   const day = String(isNaN(d.getDate()) ? new Date().getDate() : d.getDate()).padStart(2, "0");
-  const serial = 1000 + count;
-  return `ZVN${year}${month}${day}${serial}`;
+
+  const dateStr = `${year}${month}${day}`;
+  const dateNum = parseInt(dateStr, 10);
+
+  const digitalRoot = getDigitalRoot(dateStr);
+
+  const ts = timestampInput !== undefined ? timestampInput : Date.now();
+  const last3 = String(ts).slice(-3);
+  const ts3 = parseInt(last3, 10) || 123;
+
+  const x = (ts3 / 7) + digitalRoot;
+  const result = Math.floor(dateNum * x);
+  const last4 = String(result).slice(-4).padStart(4, "0");
+
+  return `ZVN${dateStr}${last4}`;
 }
 
 export default function LetterheadPage() {
@@ -32,7 +60,7 @@ export default function LetterheadPage() {
   // Current active letter state
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [date, setDate] = useState(todayStr);
-  const [refNo, setRefNo] = useState(() => generateRefNo(todayStr, 0));
+  const [refNo, setRefNo] = useState(() => generateEncryptedRefNo(todayStr));
   const [recipient, setRecipient] = useState(
     "The Risk & Compliance Division / Merchant Underwriting\nRazorpay Software Private Limited\nSJR Cyber, 1st Floor, 22 Laskar-Hosur Road,\nAdugodi, Bengaluru, Karnataka – 560030"
   );
@@ -101,6 +129,53 @@ We kindly request you to record this operational declaration and continue our ac
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [historySearch, setHistorySearch] = useState("");
 
+  // Verification Modal State & Handlers
+  const [showVerifyModal, setShowVerifyModal] = useState(false);
+  const [verifyQuery, setVerifyQuery] = useState("");
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<{ found: boolean; letter?: SavedLetter; error?: string } | null>(null);
+
+  const handleVerifyRefNo = async (queryToVerify?: string) => {
+    const query = (queryToVerify ?? verifyQuery).trim().toUpperCase();
+    if (!query) return;
+    setIsVerifying(true);
+    setVerifyResult(null);
+    try {
+      const res = await fetch(`/api/letters/verify?refNo=${encodeURIComponent(query)}`);
+      const data = await res.json();
+      if (data.success) {
+        if (data.found && data.letter) {
+          setVerifyResult({ found: true, letter: data.letter });
+        } else {
+          setVerifyResult({ found: false });
+        }
+      } else {
+        setVerifyResult({ found: false, error: data.error || "Verification check failed" });
+      }
+    } catch (err: any) {
+      setVerifyResult({ found: false, error: err.message || "Failed to connect to verification registry" });
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const openVerificationFor = (targetRefNo: string) => {
+    setVerifyQuery(targetRefNo);
+    setShowVerifyModal(true);
+    handleVerifyRefNo(targetRefNo);
+  };
+
+  // Check URL query parameters for ?verify=... on mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const verifyParam = params.get("verify") || params.get("refNo");
+      if (verifyParam) {
+        openVerificationFor(verifyParam);
+      }
+    }
+  }, []);
+
   // Print handler
   const handlePrint = () => {
     if (typeof window !== "undefined") {
@@ -135,10 +210,6 @@ We kindly request you to record this operational declaration and continue our ac
       const data = await res.json();
       if (data.success && Array.isArray(data.letters)) {
         setSavedLetters(data.letters);
-        // If this is a fresh unsaved letter, dynamically update counter based on saved count
-        if (!currentId) {
-          setRefNo(generateRefNo(date, data.letters.length));
-        }
       } else if (!data.success && data.error) {
         setSaveError(data.error);
       }
@@ -158,7 +229,7 @@ We kindly request you to record this operational declaration and continue our ac
   const handleDateChange = (newDate: string) => {
     setDate(newDate);
     if (!currentId) {
-      setRefNo(generateRefNo(newDate, savedLetters.length));
+      setRefNo(generateEncryptedRefNo(newDate));
     }
   };
 
@@ -223,7 +294,7 @@ We kindly request you to record this operational declaration and continue our ac
   // Load a selected letter into editor
   const handleLoadLetter = (item: SavedLetter) => {
     setCurrentId(item.id);
-    setRefNo(item.refNo || generateRefNo(item.date, 0));
+    setRefNo(item.refNo || generateEncryptedRefNo(item.date));
     setDate(item.date || "");
     setRecipient(item.recipient || "");
     setSubject(item.subject || "");
@@ -232,12 +303,12 @@ We kindly request you to record this operational declaration and continue our ac
     setShowHistoryModal(false);
   };
 
-  // Clear to new blank letter with automated ZVN<YYYY><MM><DD><counter>
+  // Clear to new blank letter with encrypted ZVN<YYYY><MM><DD><4-digit>
   const handleNewLetter = () => {
     setCurrentId(null);
     const today = new Date().toISOString().split("T")[0];
     setDate(today);
-    setRefNo(generateRefNo(today, savedLetters.length));
+    setRefNo(generateEncryptedRefNo(today));
     setRecipient("");
     setSubject("");
     setBodyText("");
@@ -362,6 +433,21 @@ We kindly request you to record this operational declaration and continue our ac
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
               </svg>
               <span>Saved Letters ({savedLetters.length})</span>
+            </button>
+
+            {/* Verify Ref. No. Registry Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setVerifyQuery(refNo);
+                setShowVerifyModal(true);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-indigo-950/80 hover:bg-indigo-900 text-indigo-300 border border-indigo-700/60 shadow-sm transition-all cursor-pointer"
+            >
+              <svg className="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+              </svg>
+              <span>Verify Ref. No.</span>
             </button>
 
             {/* New Blank Letter */}
@@ -595,15 +681,26 @@ We kindly request you to record this operational declaration and continue our ac
             <section className="letter-body relative flex-1 px-8 py-3 z-10 flex flex-col justify-between print:break-inside-auto">
               {/* Form Fields & Content */}
               <div className="relative z-10 flex flex-col">
-                {/* Row 1: Strict ZVN<YYYY><MM><DD><counter> Ref. No. & Date */}
+                {/* Row 1: Strict Encrypted Ref. No. & Date */}
                 <div className="flex items-center justify-between gap-6 pb-2 print:break-inside-avoid">
-                  <div className="flex items-center gap-2 flex-1 max-w-[340px]">
+                  <div className="flex items-center gap-2 flex-1 max-w-[420px]">
                     <span className="font-bold text-[11px] text-black whitespace-nowrap font-['Montserrat']">
                       Ref. No. :
                     </span>
-                    <span className="text-[11px] font-semibold text-slate-900 font-mono tracking-wider select-all px-1 py-0.5">
+                    <span className="text-[11px] font-semibold text-slate-900 font-mono tracking-wider select-all px-1.5 py-0.5 bg-slate-50 border border-slate-200 rounded print:border-none print:p-0 print:bg-transparent">
                       {refNo}
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => openVerificationFor(refNo)}
+                      title="Verify this Reference Number against Firestore Database"
+                      className="no-print text-[9.5px] font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-1.5 py-0.5 rounded cursor-pointer transition-colors flex items-center gap-1 shrink-0"
+                    >
+                      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                      </svg>
+                      <span>check in DB</span>
+                    </button>
                   </div>
 
                   <div className="flex items-center justify-end gap-2 w-[220px]">
@@ -856,6 +953,238 @@ We kindly request you to record this operational declaration and continue our ac
               <button
                 type="button"
                 onClick={() => setShowHistoryModal(false)}
+                className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 5. REF. NO. VERIFICATION TAB / MODAL (Official Database Authenticity)    */}
+      {/* ========================================================================= */}
+      {showVerifyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-950/60">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500/20 to-blue-500/20 border border-indigo-500/30 text-indigo-400 flex items-center justify-center font-bold text-base shadow-sm">
+                  🛡️
+                </div>
+                <div>
+                  <h2 className="text-white font-bold text-base flex items-center gap-2">
+                    Official Letterhead Verification
+                    <span className="text-[10px] font-semibold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20">
+                      Live Database Registry
+                    </span>
+                  </h2>
+                  <p className="text-slate-400 text-xs">
+                    Verify the authenticity of any Zivic Nexus reference number against Firestore
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowVerifyModal(false)}
+                className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+              {/* Search Bar */}
+              <div>
+                <label className="block text-slate-300 text-xs font-semibold mb-1.5">
+                  Enter Reference Number to Verify
+                </label>
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      value={verifyQuery}
+                      onChange={(e) => setVerifyQuery(e.target.value.toUpperCase())}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          handleVerifyRefNo();
+                        }
+                      }}
+                      placeholder="e.g. ZVN202610243328"
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono tracking-wider placeholder:text-slate-500 focus:outline-none transition-colors"
+                    />
+                    {verifyQuery && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVerifyQuery("");
+                          setVerifyResult(null);
+                        }}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleVerifyRefNo()}
+                    disabled={isVerifying || !verifyQuery.trim()}
+                    className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs font-semibold shadow-md shadow-indigo-900/30 transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1.5 shrink-0"
+                  >
+                    {isVerifying ? (
+                      <>
+                        <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                        </svg>
+                        <span>Checking...</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                        <span>Verify Ref. No.</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Verification Result Display */}
+              {verifyResult && (
+                <div className="transition-all animate-fadeIn">
+                  {verifyResult.found && verifyResult.letter ? (
+                    <div className="bg-emerald-950/30 border border-emerald-500/40 rounded-2xl p-4 sm:p-5 space-y-3">
+                      <div className="flex items-start justify-between gap-3 flex-wrap">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-base shrink-0 border border-emerald-500/30">
+                            ✓
+                          </div>
+                          <div>
+                            <span className="text-emerald-400 font-bold text-sm tracking-wide flex items-center gap-1.5">
+                              AUTHENTICATED OFFICIAL LETTERHEAD
+                            </span>
+                            <p className="text-emerald-300/80 text-[11px]">
+                              Verified against Zivic Nexus official cloud registry
+                            </p>
+                          </div>
+                        </div>
+                        <span className="font-mono text-xs font-bold text-emerald-300 bg-emerald-500/20 px-2.5 py-1 rounded-lg border border-emerald-500/30">
+                          {verifyResult.letter.refNo}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2 border-t border-emerald-500/20 text-xs">
+                        <div className="bg-slate-900/70 p-2.5 rounded-xl border border-slate-800">
+                          <span className="text-slate-400 text-[10px] uppercase font-bold block mb-0.5">Issue Date</span>
+                          <span className="text-white font-medium">{verifyResult.letter.date || "Not recorded"}</span>
+                        </div>
+                        <div className="bg-slate-900/70 p-2.5 rounded-xl border border-slate-800">
+                          <span className="text-slate-400 text-[10px] uppercase font-bold block mb-0.5">Database Record ID</span>
+                          <span className="text-slate-300 font-mono text-[11px] truncate block" title={verifyResult.letter.id}>
+                            {verifyResult.letter.id}
+                          </span>
+                        </div>
+                        <div className="bg-slate-900/70 p-2.5 rounded-xl border border-slate-800 sm:col-span-2">
+                          <span className="text-slate-400 text-[10px] uppercase font-bold block mb-0.5">Recipient</span>
+                          <span className="text-white font-medium whitespace-pre-line line-clamp-2">
+                            {verifyResult.letter.recipient || "Not specified"}
+                          </span>
+                        </div>
+                        <div className="bg-slate-900/70 p-2.5 rounded-xl border border-slate-800 sm:col-span-2">
+                          <span className="text-slate-400 text-[10px] uppercase font-bold block mb-0.5">Subject</span>
+                          <span className="text-white font-medium line-clamp-2">
+                            {verifyResult.letter.subject || "Not specified"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end pt-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (verifyResult.letter) {
+                              handleLoadLetter(verifyResult.letter);
+                              setShowVerifyModal(false);
+                            }
+                          }}
+                          className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
+                        >
+                          <span>📄 Load into Editor</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-red-950/30 border border-red-500/40 rounded-2xl p-4 sm:p-5 flex items-start gap-3">
+                      <div className="w-8 h-8 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center font-bold text-base shrink-0 border border-red-500/30">
+                        ✕
+                      </div>
+                      <div>
+                        <h3 className="text-red-400 font-bold text-sm tracking-wide">
+                          UNVERIFIED / INVALID REFERENCE NUMBER
+                        </h3>
+                        <p className="text-red-300/80 text-xs mt-1 leading-relaxed">
+                          The reference number <strong className="font-mono text-white">{verifyQuery}</strong> was NOT found in the Zivic Nexus official database.
+                        </p>
+                        <p className="text-slate-400 text-[11px] mt-1.5">
+                          If this number appears on a physical or digital letterhead, it may be an unrecorded draft, forged, or unauthorized document.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Registered Letters in DB quick-list */}
+              <div>
+                <h4 className="text-slate-400 text-[11px] font-bold uppercase tracking-wider mb-2 flex items-center justify-between">
+                  <span>Saved Letters in Registry ({savedLetters.length})</span>
+                  <span className="text-[10px] font-normal lowercase text-slate-500">Click any Ref No to test verification</span>
+                </h4>
+                {savedLetters.length === 0 ? (
+                  <p className="text-slate-500 text-xs py-2">No letterheads saved in the database yet.</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                    {savedLetters.map((l) => (
+                      <div
+                        key={l.id}
+                        onClick={() => {
+                          setVerifyQuery(l.refNo || "");
+                          handleVerifyRefNo(l.refNo || "");
+                        }}
+                        className="flex items-center justify-between p-2 rounded-xl bg-slate-950/60 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-xs cursor-pointer transition-colors"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="font-mono font-bold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20 text-[11px] shrink-0">
+                            {l.refNo || "No Ref. No."}
+                          </span>
+                          <span className="text-slate-300 truncate text-[11px]">
+                            {l.subject || "Untitled"}
+                          </span>
+                        </div>
+                        <span className="text-slate-500 text-[10px] shrink-0 pl-2">
+                          {l.date}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 border-t border-slate-800 bg-slate-950/60 flex items-center justify-between">
+              <span className="text-slate-500 text-[11px]">
+                Cryptographic timestamp & digital root validation
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowVerifyModal(false)}
                 className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium cursor-pointer"
               >
                 Close
